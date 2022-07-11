@@ -1,3 +1,5 @@
 logs
+figs
 *.ckpt
 *.pkl
+*.pt

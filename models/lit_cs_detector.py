@@ -5,28 +5,37 @@ import torchaudio
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from utils.transforms import interp_targets
+from models.WavLM import WavLM, WavLMConfig
 
 class LitCSDetector(pl.LightningModule):
-    def __init__(self, model, learning_rate=1e-4):
+    def __init__(self, backbone, learning_rate=1e-4):
         super().__init__()
         self.save_hyperparameters()
 
-        assert model in ["base"], f'model: {model} not supported.'
+        assert backbone in ["base", "wavlm"], f'model: {backbone} not supported.'
 
-        if model == "base":
+        if backbone == "base":
             bundle = torchaudio.pipelines.WAV2VEC2_BASE
-            self.feature_extractor = bundle.get_model()
+            self.wav2vec2 = bundle.get_model()
             self.head = nn.Sequential(OrderedDict([('linear1', nn.Linear(768, 4096)), ('linear2', nn.Linear(4096, 2))]))
 
+        # if backbone == "wavlm":
+        #     checkpoint = torch.load('/home/geoff/Documents/penguin/models/WavLM-Base.pt')
+        #     cfg = WavLMConfig(checkpoint['cfg'])
+        #     self.feature_extractor = WavLM(cfg)
+        #     self.feature_extractor.load_state_dict(checkpoint['model'])
+            
+        #     self.head = nn.Sequential(OrderedDict([('linear1', nn.Linear(768, 4096)), ('linear2', nn.Linear(4096, 2))]))
+
     def forward(self, x, l):
-        x, lengths = self.feature_extractor(x, l)
+        x, lengths = self.wav2vec2(x, l)
         x = self.head(x)
         return x, lengths
 
     def training_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
         y_hat, lengths = self.forward(x, x_l)
-        loss = aggregate_bce_loss(y_hat, y, lengths)
+        loss, y = aggregate_bce_loss(y_hat, y, lengths)
         self.log('train/loss', loss)
         return {'loss':loss, 'y_hat':y_hat, 'y':y, 'lengths':lengths}
     
@@ -39,7 +48,7 @@ class LitCSDetector(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
         y_hat, lengths = self.forward(x, x_l)
-        loss = aggregate_bce_loss(y_hat, y, lengths)
+        loss, y = aggregate_bce_loss(y_hat, y, lengths)
         self.log('va;/loss', loss)
         return {'y_hat':y_hat, 'y':y, 'lengths':lengths}
 
@@ -62,4 +71,4 @@ def aggregate_bce_loss(y_hat, y, lengths):
     y = interp_targets(y, torch.max(lengths))
     idxs = get_unpadded_idxs(lengths)
     loss = F.cross_entropy(y_hat.view(-1, 2)[idxs], y.view(-1)[idxs])
-    return loss
+    return loss, y
