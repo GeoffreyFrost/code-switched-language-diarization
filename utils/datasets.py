@@ -2,6 +2,7 @@ import pandas as pd
 import random
 import torch
 import torchaudio
+from torch.utils.data import DataLoader
 from datasets import Dataset, DatasetDict
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -73,3 +74,27 @@ def collator(batch):
     yy_ll = torch.tensor(yy_ll, dtype=torch.float)
 
     return pad_sequence(xx, batch_first=True), xx_ll, pad_sequence(yy, batch_first=True, padding_value=1), yy_ll
+
+def norm_labels(x):
+    x[x > 0] = 1.0
+    return x
+
+def read_pickle_df(path, norm_labels=True):
+    df = pd.read_pickle(path)
+    if norm_labels: df = df.tgts.map(norm_labels)
+    return df
+
+def create_dataloaders(df_trn, df_dev, df_tst=None, bs=1):
+
+    dataset_trn = CSDataset(df_trn)
+    dataset_dev = CSDataset(df_dev)
+    
+    train_dataloader = DataLoader(dataset_trn, batch_size=bs, shuffle=True, collate_fn=collator, num_workers=12)
+    dev_dataloader = DataLoader(dataset_dev, batch_size=bs, collate_fn=collator, num_workers=12)
+
+    if df_tst != None:
+        dataset_test = CSDataset(df_dev)
+        test_dataloader = DataLoader(dataset_test, batch_size=bs, collate_fn=collator, num_workers=12)
+        return  train_dataloader, dev_dataloader, test_dataloader
+    
+    return train_dataloader, dev_dataloader
