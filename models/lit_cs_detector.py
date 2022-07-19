@@ -1,4 +1,4 @@
-from typing import OrderedDict
+import gc
 import torch
 import torch.nn as nn
 import torchaudio
@@ -11,34 +11,63 @@ from torch.nn import Module, ModuleDict
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.optim.optimizer import Optimizer
 import logging
-from utils.transforms import interp_targets
+from utils.transforms import interp_targets, SpecAugment
 from models.WavLM import WavLM, WavLMConfig
+from dataclasses import dataclass
+
 log = logging.getLogger(__name__)
 
 def multiplicative(epoch: int) -> float:
     return 2.0
 
+@dataclass
+class LitCSDetectorConfig():
+    backbone:str='base'
+    freeze_feature_extractor:bool=True
+    label_smoothing:float=0.0
+    specaugment:bool=True
+    time_masking_percentage:float=0.05
+    feature_masking_percentage:float=0.05
+    n_feature_masks:int=2
+    n_time_masks:int=2
+    learning_rate:float=1e-4
+    
 class LitCSDetector(pl.LightningModule):
-    def __init__(self, backbone, learning_rate=1e-4, label_smoothing=0.0):
+    def __init__(self, learning_rate=1e-4, config=None):
         super().__init__()
         self.save_hyperparameters()
-        self.label_smoothing = label_smoothing
-        assert backbone in ["base","large", "xlsr"], f'model: {backbone} not supported.'
 
-        if backbone == "base":
+        if config==None: self.config = LitCSDetectorConfig()
+        else: self.config = config
+        self.label_smoothing = config.label_smoothing
+        self.specaugment = config.specaugment
+        if self.specaugment: self.spec_augmenter=SpecAugment(
+                                    feature_masking_percentage=config.feature_masking_percentage,
+                                    time_masking_percentage=config.time_masking_percentage,
+                                    n_feature_masks=config.n_feature_masks,
+                                    n_time_masks=config.n_time_masks
+                                    )
+
+        assert config.backbone in ["base","large", "xlsr"], f'model: {config.backbone} not supported.'
+
+        if config.backbone == "base":
             bundle = torchaudio.pipelines.WAV2VEC2_BASE
             self.backbone = bundle.get_model()
             self.head = nn.Linear(768, 2)
 
-        if backbone == "large":
+        if config.backbone == "large":
             bundle = torchaudio.pipelines.WAV2VEC2_LARGE
             self.backbone = bundle.get_model()
             self.head = nn.Linear(1024, 2)
 
-        if backbone == "xlsr":
+        if config.backbone == "xlsr":
             bundle = torchaudio.pipelines.WAV2VEC2_XLSR53
             self.backbone = bundle.get_model()
             self.head = nn.Linear(1024, 2)
+
+        if config.freeze_feature_extractor:
+            for param in self.backbone.feature_extractor.parameters():
+                param.requires_grad = False
 
             #self.head = nn.Sequential(OrderedDict([('linear1', nn.Linear(768, 4096)), ('linear2', nn.Linear(4096, 2))]))
 
@@ -51,8 +80,12 @@ class LitCSDetector(pl.LightningModule):
         #     self.head = nn.Sequential(OrderedDict([('linear1', nn.Linear(768, 4096)), ('linear2', nn.Linear(4096, 2))]))
 
     def forward(self, x, l):
-        x, lengths = self.backbone(x, l)
+        
+        x, lengths = self.backbone.feature_extractor(x, l)
+        if self.specaugment: x = self.spec_augmenter.forward(x)
+        x = self.backbone.encoder(x, lengths)
         x = self.head(x)
+
         return x, lengths
 
     def training_step(self, batch, batch_idx):
@@ -88,28 +121,14 @@ class LitCSDetector(pl.LightningModule):
         lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
         return {'optimizer':optimizer, 'lr_scheduler':lr_scheduler}
 
-    # def freeze_backbone(self):
-    #     for param in self.wav2vec2.parameters():
-    #         param.requires_grad = False
-
-    # def freeze_feature_extractor(self):
-    #     for param in self.wav2vec2.feature_extractor.parameters():
-    #         param.requires_grad = False
-
-    # def unfreeze_backbone(self, freeze_feature_extractor=False):
-    #     for param in self.wav2vec2.parameters():
-    #         param.requires_grad = True
-    #     if freeze_feature_extractor: self.freeze_feature_extractor()
-
 def get_unpadded_idxs(lengths):
     max_len = torch.max(lengths)
     return torch.cat([torch.arange(max_len*i, max_len*i+l) for i, l in enumerate(lengths)]).to(torch.long)
 
 def aggregate_bce_loss(y_hat, y, lengths, label_smoothing=0.0):
-    eps = 1e-10
     y = interp_targets(y, torch.max(lengths))
     idxs = get_unpadded_idxs(lengths)
-    loss = F.cross_entropy(y_hat.view(-1, 2)[idxs] + eps, y.view(-1)[idxs], label_smoothing=label_smoothing)
+    loss = F.cross_entropy(y_hat.view(-1, 2)[idxs], y.view(-1)[idxs], label_smoothing=label_smoothing)
     return loss, y
 
 class BackboneFinetuning(BaseFinetuning):
