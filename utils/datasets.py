@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import random
 import torch
@@ -75,14 +76,33 @@ def collator(batch):
 
     return pad_sequence(xx, batch_first=True), xx_ll, pad_sequence(yy, batch_first=True, padding_value=1), yy_ll
 
-def norm_labels(x):
+def norm_binary_labels_func(x):
+    x = norm_labels_func(x)
     x[x > 0] = 1.0
     return x
 
-def read_pickle_df(path, norm_labels=True):
+def norm_labels_func(x):
+    x = x - 1.0
+    return x
+
+def read_pickle_df(path, norm_labels=True, binary_labels=True):
     df = pd.read_pickle(path)
-    if norm_labels: df = df.tgts.map(norm_labels)
+    if norm_labels: 
+        if binary_labels: df.tgts = df.tgts.map(norm_binary_labels_func)
+        else: df.tgts = df.tgts.map(norm_labels_func)       
     return df
+
+def load_dfs(data_df_root_dir, cs_pair):
+    if cs_pair == 'all': 
+        df_trn = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_trn.pkl"), binary_labels=False)
+        df_dev = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_dev.pkl"), binary_labels=False)
+    
+    else:
+        df_trn = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_trn.pkl"))
+        df_dev = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_dev.pkl"))
+    
+    return df_trn, df_dev
+
 
 def create_dataloaders(df_trn, df_dev, df_tst=None, bs=1):
 
