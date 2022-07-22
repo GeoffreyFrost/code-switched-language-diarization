@@ -6,6 +6,9 @@ from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from typing import Any, Callable, Dict, Optional
 from torch.optim.optimizer import Optimizer
 import logging
+from torch.nn import Module
+import pytorch_lightning as pl
+
 def multiplicative(epoch: int) -> float:
     return 2.0
 

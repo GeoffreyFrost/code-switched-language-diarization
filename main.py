@@ -14,6 +14,8 @@ def set_configs(args):
     model_config.backbone=args.backbone
     model_config.specaugment=args.specaugment
     model_config.freeze_feature_extractor=args.freeze_feature_extractor
+    model_config.combine_intermediate=args.combine_intermediate
+    model_config.cross_attention=args.cross_attention
 
     trainer_config.batch_size=args.batch_size
     trainer_config.accumulate_grad_batches=args.accumulate_grad_batches
@@ -47,6 +49,8 @@ def arg_paser():
     parser.add_argument('--backbone', default='base')
     parser.add_argument('--specaugment', default=False, type=bool)
     parser.add_argument('--freeze-feature-extractor', default=True, type=bool)
+    parser.add_argument('--combine-intermediate', default=False, type=bool)
+    parser.add_argument('--cross-attention', default=True, type=bool)
 
     parser.add_argument('--cs-pair', default='all')
     parser.add_argument('--routine', default='semi-supervised')

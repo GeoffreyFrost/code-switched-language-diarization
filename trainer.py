@@ -5,6 +5,7 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from models.lit_cs_detector import LitCSDetector
 from utils.lit_callbacks import BackboneFinetuning
+from utils.modules import config_logger
 import pandas as pd
 import os
 
@@ -33,6 +34,7 @@ class Trainer():
         self.trainer_config = trainer_config
         self.experimental_config = experimental_config
         self.supported_cs_pairs = ["engzul", "engxho", "engtsn", "engsot"]
+        config_logger(model_config, trainer_config, experimental_config)
 
     def get_dfs(self):
         if self.experimental_config.cs_pair != 'all':
