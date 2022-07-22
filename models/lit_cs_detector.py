@@ -99,7 +99,7 @@ class LitCSDetector(pl.LightningModule):
     def training_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])] for x in out])
         y = torch.cat([x['y'].view(-1)[get_unpadded_idxs(x['lengths'])]for x in out])
-        accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y).sum().float() / float( y.size(0))
+        accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
         self.log("train/train_acc", accuracy, on_epoch=True)
         gc.collect()
 
@@ -113,7 +113,7 @@ class LitCSDetector(pl.LightningModule):
     def validation_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])] for x in out])
         y = torch.cat([x['y'].view(-1)[get_unpadded_idxs(x['lengths'])]for x in out])
-        accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y).sum().float() / float( y.size(0))
+        accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
         self.log("val/val_acc", accuracy, on_epoch=True)
 
     def configure_optimizers(self):
