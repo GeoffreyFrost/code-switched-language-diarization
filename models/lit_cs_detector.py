@@ -98,7 +98,7 @@ class LitCSDetector(pl.LightningModule):
     
     def training_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])] for x in out])
-        y = torch.cat([x['y'].view(-1)[get_unpadded_idxs(x['lengths'])]for x in out])
+        y = torch.cat([x['y'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])]for x in out])
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
         self.log("train/train_acc", accuracy, on_epoch=True)
         gc.collect()
@@ -112,7 +112,7 @@ class LitCSDetector(pl.LightningModule):
 
     def validation_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])] for x in out])
-        y = torch.cat([x['y'].view(-1)[get_unpadded_idxs(x['lengths'])]for x in out])
+        y = torch.cat([x['y'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])]for x in out])
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
         self.log("val/val_acc", accuracy, on_epoch=True)
 
@@ -136,7 +136,8 @@ def get_unpadded_idxs(lengths):
 def aggregate_bce_loss(y_hat, y, lengths, n_classes, label_smoothing=0.0):
     y = interp_targets(y, torch.max(lengths))
     idxs = get_unpadded_idxs(lengths)
-    y = fuzzy_cs_labels(y, lengths, n_classes)
+    # y = fuzzy_cs_labels(y, lengths, n_classes)
+    y=F.one_hot(y.to(torch.long), num_classes=n_classes).float()
     # loss = F.cross_entropy(y_hat.view(-1, n_classes)[idxs], y.view(-1)[idxs], label_smoothing=label_smoothing)
     loss = F.cross_entropy(y_hat.view(-1, n_classes)[idxs], y.view(-1, n_classes)[idxs], label_smoothing=label_smoothing)
     return loss, y
@@ -152,21 +153,22 @@ def fuzzy_cs_labels(targets, lengths, num_classes):
     l_index = switches[1][0::2].long()
     r_index = switches[1][1::2].long()
     b_index = switches[0][1::2].long()
-    switch_from_pad = r_index+1 <= lengths[b_index]
+    inter_probs =  torch.linspace(0, 1, 7)
+    half_way = len(inter_probs)//2 + 1
+    switch_from_pad = r_index+half_way+1 <= lengths[b_index]
     b_index = b_index[switch_from_pad]
     l_index = l_index[switch_from_pad]
     l_s = l_s[switch_from_pad]
     r_s = r_s[switch_from_pad]
 
     one_hot_labels = F.one_hot(targets.to(torch.long), num_classes=num_classes)
-    inter_probs =  torch.linspace(0, 1, 5)
     if len(b_index):
         for i, prob in enumerate(inter_probs):
             idex = torch.tensor(len(inter_probs)-i).long()
-            half_way = len(inter_probs)//2 + 1
             assert(b_index.max() <= lengths.size(0)), f'{b_index.max()} > bs {lengths.size(0)}'
-            assert((l_index+half_way-idex).max() < one_hot_labels.size(-2)), f'{(l_index+half_way-idex).max()} < max seq len'
+            assert((l_index+half_way-idex).max() < one_hot_labels.size(-2)), f'{(l_index+half_way-idex).max()} > max seq len'
             one_hot_labels[b_index, l_index+half_way-idex, l_s] = torch.tensor(1.0 - float(prob)).long().cuda()
             one_hot_labels[b_index, l_index+half_way-idex, r_s] = torch.tensor(float(prob)).long().cuda()
+    del r_s, l_s, l_index, r_index, inter_probs
 
     return one_hot_labels.float()
