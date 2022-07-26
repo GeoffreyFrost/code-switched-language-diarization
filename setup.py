@@ -25,4 +25,3 @@ def create_dfs(dataset_root_dir, override=False):
 
 if __name__ == '__main__':
     create_dfs('/home/gfrost/datasets', override=True)
-

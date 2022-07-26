@@ -24,6 +24,8 @@ class ModelConfig():
     n_classes:int=2
     combine_intermediate:bool=False
     cross_attention:bool=True
+    rnn_encoder:bool=False
+    soft_loss:bool=False
     
 class LitCSDetector(pl.LightningModule):
     def __init__(self, learning_rate=1e-4, model_config=None):
@@ -36,10 +38,10 @@ class LitCSDetector(pl.LightningModule):
         self.specaugment = model_config.specaugment
         self.combine_intermediate = model_config.combine_intermediate
         self.cross_attention = model_config.cross_attention
-        
+        self.rnn_encoder = model_config.rnn_encoder
+        self.soft_loss = model_config.soft_loss
         if self.combine_intermediate: factor = 2
         else: factor = 1
-
         if self.specaugment: self.spec_augmenter=SpecAugment(
                                     feature_masking_percentage=model_config.feature_masking_percentage,
                                     time_masking_percentage=model_config.time_masking_percentage,
@@ -63,16 +65,28 @@ class LitCSDetector(pl.LightningModule):
             bundle = torchaudio.pipelines.WAV2VEC2_XLSR53
             self.backbone = bundle.get_model()
             embed_dim = 1024
+
+        if self.rnn_encoder: 
+            self.encoder = nn.GRU(input_size=embed_dim, 
+                                hidden_size=embed_dim, 
+                                num_layers=1, 
+                                batch_first=True, 
+                                bidirectional=True)
+            factor = 2
+
         if self.cross_attention and self.combine_intermediate:
             self.cross_attention = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=16, dropout=0.1, batch_first=True)
             self.head = nn.Linear(embed_dim*(factor-1), model_config.n_classes)
+
         else: self.head = nn.Linear(embed_dim*factor, model_config.n_classes)
+
+        if self.soft_loss: self.soft_head = nn.Linear(model_config.n_classes, model_config.n_classes)
 
         if model_config.freeze_feature_extractor:
             for param in self.backbone.feature_extractor.parameters():
                 param.requires_grad = False
 
-    def forward(self, x, l):
+    def forward(self, x, l, overide=False):
         
         x, lengths = self.backbone.feature_extractor(x, l)
         if self.specaugment: x = self.spec_augmenter.forward(x)
@@ -85,7 +99,11 @@ class LitCSDetector(pl.LightningModule):
             else: x = torch.cat((x[len(x)//2+4], x[-1]), dim=-1)
 
         else: x = self.backbone.encoder(x, lengths)
+        if self.rnn_encoder: x, _ = self.encoder(x)
         x = self.head(x)
+
+        if self.current_epoch > 6 or overide:
+            x = self.soft_head(x)
 
         return x, lengths
 

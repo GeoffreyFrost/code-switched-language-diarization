@@ -6,30 +6,21 @@ from models.lit_cs_detector import ModelConfig
 from setup import create_dfs
 
 def set_configs(args):
+
     model_config = ModelConfig()
     trainer_config = TrainerConfig()
     experiment_config = ExperimentConfig()
+    
+    arg_fields = list(vars(args).keys())
 
-    model_config.label_smoothing=args.label_smoothing
-    model_config.backbone=args.backbone
-    model_config.specaugment=args.specaugment
-    model_config.freeze_feature_extractor=args.freeze_feature_extractor
-    model_config.combine_intermediate=args.combine_intermediate
-    model_config.cross_attention=args.cross_attention
+    for field in model_config.__dataclass_fields__: 
+        if field in arg_fields: setattr(model_config, field, vars(args)[field])
 
-    trainer_config.batch_size=args.batch_size
-    trainer_config.accumulate_grad_batches=args.accumulate_grad_batches
-    trainer_config.max_epochs=args.max_epochs
-    trainer_config.grad_clip_val=args.grad_clip_val
-    trainer_config.precision=args.precision
-    trainer_config.learning_rate=args.learning_rate
-    trainer_config.backbone_warmup=args.backbone_warmup
-    trainer_config.unfreeze_at_epoch=args.unfreeze_at_epoch
-
-    experiment_config.cs_pair=args.cs_pair
-    experiment_config.routine=args.routine
-    experiment_config.n_refinement_stages=args.n_refinement_stages
-    experiment_config.unlabeled_ratio=args.unlabeled_ratio
+    for field in trainer_config.__dataclass_fields__: 
+        if field in arg_fields: setattr(model_config, field, vars(args)[field])
+    
+    for field in experiment_config.__dataclass_fields__: 
+        if field in arg_fields: setattr(model_config, field, vars(args)[field])
     
     return model_config, trainer_config, experiment_config
 
@@ -52,9 +43,13 @@ def arg_paser():
     parser.add_argument('--freeze-feature-extractor', action='store_true')
     parser.add_argument('--combine-intermediate', action='store_true')
     parser.add_argument('--cross-attention', action='store_true')
+    parser.add_argument('--rnn-encoder', action='store_true')
+    parser.add_argument('--soft-loss', action='store_true')
     parser.set_defaults(freeze_feature_extractor=False)
     parser.set_defaults(combine_intermediate=False)
     parser.set_defaults(cross_attention=False)
+    parser.set_defaults(rnn_encoder=False)
+    parser.set_defaults(soft_loss=False)
 
     parser.add_argument('--cs-pair', default='all')
     parser.add_argument('--routine', default='semi-supervised')
