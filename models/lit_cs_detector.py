@@ -49,7 +49,7 @@ class LitCSDetector(pl.LightningModule):
                                     n_time_masks=model_config.n_time_masks
                                     )
 
-        assert model_config.backbone in ["base","large", "xlsr"], f'model: {model_config.backbone} not supported.'
+        assert model_config.backbone in ["base","large", "xlsr", "wavlm-large"], f'model: {model_config.backbone} not supported.'
         
         if model_config.backbone == "base":
             bundle = torchaudio.pipelines.WAV2VEC2_BASE
@@ -65,6 +65,13 @@ class LitCSDetector(pl.LightningModule):
             bundle = torchaudio.pipelines.WAV2VEC2_XLSR53
             self.backbone = bundle.get_model()
             embed_dim = 1024
+
+        # if model_config.backbone == "wavlm-large":
+        #     checkpoint = torch.load('/home/gfrost/projects/penguin/models/WavLM-Large.pt')
+        #     cfg = WavLMConfig(checkpoint['cfg'])
+        #     self.backbone = WavLM(cfg)
+        #     self.backbone.load_state_dict(checkpoint['model'])
+        #     embed_dim = 1024
 
         if self.rnn_encoder: 
             self.encoder = nn.GRU(input_size=embed_dim, 
@@ -88,17 +95,22 @@ class LitCSDetector(pl.LightningModule):
 
     def forward(self, x, l, overide=False):
         
-        x, lengths = self.backbone.feature_extractor(x, l)
-        if self.specaugment: x = self.spec_augmenter.forward(x)
-        # Include intermediate layer for more syntactic infomation (wav2vec-U)
-        if self.combine_intermediate: 
-            x = self.backbone.encoder.extract_features(x, lengths)
-            if self.cross_attention: 
-                att_masks = get_attention_masks(lengths, x[-1].size(-2), 16)
-                x, _ = self.cross_attention(x[len(x)//2+4], x[-1], x[-1], attn_mask=att_masks)
-            else: x = torch.cat((x[len(x)//2+4], x[-1]), dim=-1)
+        if self.model_config.backbone in ['wavlm-large']:
+            x, lengths = self.backbone.feature_extractor(x, lengths=l)
 
-        else: x = self.backbone.encoder(x, lengths)
+        else: 
+            x, lengths = self.backbone.feature_extractor(x, l)
+            if self.specaugment: x = self.spec_augmenter.forward(x)
+            # Include intermediate layer for more syntactic infomation (wav2vec-U)
+            if self.combine_intermediate: 
+                x = self.backbone.encoder.extract_features(x, lengths)
+                if self.cross_attention: 
+                    att_masks = get_attention_masks(lengths, x[-1].size(-2), 16)
+                    x, _ = self.cross_attention(x[len(x)//2+4], x[-1], x[-1], attn_mask=att_masks)
+                else: x = torch.cat((x[len(x)//2+4], x[-1]), dim=-1)
+
+            else: x = self.backbone.encoder(x, lengths)
+
         if self.rnn_encoder: x, _ = self.encoder(x)
         x = self.head(x)
 
