@@ -26,6 +26,7 @@ class ModelConfig():
     cross_attention:bool=True
     rnn_encoder:bool=False
     soft_loss:bool=False
+    soft_loss_context:int=2
     
 class LitCSDetector(pl.LightningModule):
     def __init__(self, learning_rate=1e-4, model_config=None):
@@ -34,14 +35,18 @@ class LitCSDetector(pl.LightningModule):
 
         if model_config==None: self.model_config = ModelConfig()
         else: self.model_config = model_config
+
         self.label_smoothing = model_config.label_smoothing
         self.specaugment = model_config.specaugment
         self.combine_intermediate = model_config.combine_intermediate
         self.cross_attention = model_config.cross_attention
         self.rnn_encoder = model_config.rnn_encoder
         self.soft_loss = model_config.soft_loss
+        self.soft_loss_context = model_config.soft_loss_context
+
         if self.combine_intermediate: factor = 2
         else: factor = 1
+
         if self.specaugment: self.spec_augmenter=SpecAugment(
                                     feature_masking_percentage=model_config.feature_masking_percentage,
                                     time_masking_percentage=model_config.time_masking_percentage,
@@ -66,12 +71,12 @@ class LitCSDetector(pl.LightningModule):
             self.backbone = bundle.get_model()
             embed_dim = 1024
 
-        # if model_config.backbone == "wavlm-large":
-        #     checkpoint = torch.load('/home/gfrost/projects/penguin/models/WavLM-Large.pt')
-        #     cfg = WavLMConfig(checkpoint['cfg'])
-        #     self.backbone = WavLM(cfg)
-        #     self.backbone.load_state_dict(checkpoint['model'])
-        #     embed_dim = 1024
+        if model_config.backbone == "wavlm-large":
+            checkpoint = torch.load('/home/gfrost/projects/penguin/models/WavLM-Large.pt')
+            cfg = WavLMConfig(checkpoint['cfg'])
+            self.backbone = WavLM(cfg)
+            self.backbone.load_state_dict(checkpoint['model'])
+            embed_dim = 1024
 
         if self.rnn_encoder: 
             self.encoder = nn.GRU(input_size=embed_dim, 
@@ -87,16 +92,18 @@ class LitCSDetector(pl.LightningModule):
 
         else: self.head = nn.Linear(embed_dim*factor, model_config.n_classes)
 
-        if self.soft_loss: self.soft_head = nn.Linear(model_config.n_classes, model_config.n_classes)
+        if self.soft_loss: self.soft_head = nn.Linear(model_config.n_classes + model_config.n_classes*2*model_config.soft_loss_context, 
+                                                model_config.n_classes)
 
         if model_config.freeze_feature_extractor:
             for param in self.backbone.feature_extractor.parameters():
                 param.requires_grad = False
 
-    def forward(self, x, l, overide=False):
+    def forward(self, x, l, padding_masks=None, overide=False):
         
-        if self.model_config.backbone in ['wavlm-large']:
-            x, lengths = self.backbone.feature_extractor(x, lengths=l)
+        if self.model_config.backbone == 'wavlm-large':
+        # x, lengths = self.backbone.extract_features(x, padding_mask=padding_masks, mask=True)
+            x, lengths = self.backbone.extract_features(x)
 
         else: 
             x, lengths = self.backbone.feature_extractor(x, l)
@@ -115,6 +122,7 @@ class LitCSDetector(pl.LightningModule):
         x = self.head(x)
 
         if self.current_epoch > 6 or overide:
+            x = cat_neighbors_for_soft_loss(x, self.model_config.soft_loss_context)
             x = self.soft_head(x)
 
         return x, lengths
@@ -122,6 +130,8 @@ class LitCSDetector(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
         y_hat, lengths = self.forward(x, x_l)
+        if self.model_config.backbone in ['wavlm-large']: 
+            lengths = torch.tensor(y_hat.size(-1)).to(y_hat.device).repeat(y_hat.size(0)).detach() # for debug, remove
         loss, y = aggregate_bce_loss(y_hat, y, lengths, self.model_config.n_classes, self.label_smoothing)
         self.log('train/loss', loss)
         return {'loss':loss, 'y_hat':y_hat, 'y':y, 'lengths':lengths}
@@ -136,6 +146,8 @@ class LitCSDetector(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
         y_hat, lengths = self.forward(x, x_l)
+        if self.model_config.backbone in ['wavlm-large']: 
+            lengths = torch.tensor(y_hat.size(-1)).to(y_hat.device).repeat(y_hat.size(0)).detach() # for debug, remove
         loss, y = aggregate_bce_loss(y_hat, y, lengths, self.model_config.n_classes, self.label_smoothing)
         self.log('val/loss', loss)
         return {'y_hat':y_hat, 'y':y, 'lengths':lengths}
@@ -152,6 +164,23 @@ class LitCSDetector(pl.LightningModule):
                                     weight_decay=0.1)
         lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
         return {'optimizer':optimizer, 'lr_scheduler':lr_scheduler}
+
+def cat_neighbors_for_soft_loss(x, soft_loss_context):
+
+    x_l = torch.zeros_like(x).repeat(1, 1, soft_loss_context)
+    x_r = torch.zeros_like(x).repeat(1, 1, soft_loss_context)
+
+    for i in range(soft_loss_context): x_l[:, i+1:, i*x.size(-1):(i+1)*x.size(-1)] = x[:, :-(i+1), :]
+    for i in range(soft_loss_context): x_r[:, :-(i+1), i*x.size(-1):(i+1)*x.size(-1)] = x[:, i+1:, :]
+
+    return torch.cat([x, x_l, x_r], dim=-1)
+
+def get_padding_masks_from_length(source, lengths):
+    indexs = torch.arange(source.size(-1)).unsqueeze(dim=0).repeat(lengths.size(0), 1).to(lengths.device)
+    lengths = lengths.unsqueeze(dim=-1).repeat(1, indexs.size(-1))
+    padding_mask = indexs > lengths
+    return padding_mask
+
 
 def get_attention_masks(lengths, max_len, nheads):
     masks1d = (torch.arange(max_len).cuda()[None, :] > lengths[:, None]).repeat(nheads, 1).unsqueeze(dim=-1)

@@ -323,7 +323,6 @@ class WavLM(nn.Module):
     def extract_features(
         self,
         source: torch.Tensor,
-        lengths: Optional[torch.Tensor] = None,
         padding_mask: Optional[torch.Tensor] = None,
         mask: bool = False,
         ret_conv: bool = False,
@@ -342,11 +341,6 @@ class WavLM(nn.Module):
         features = features.transpose(1, 2)
         features = self.layer_norm(features)
 
-        if lengths is not None:
-            padding_mask = torch.zeros_like(source)
-            for i, length in enumerate(lengths): padding_mask[i, length:] = 1.
-            padding_mask = padding_mask.to(torch.bool)
-            
         if padding_mask is not None:
             padding_mask = self.forward_padding_mask(features, padding_mask)
 
@@ -378,7 +372,7 @@ class WavLM(nn.Module):
         feature = res["features"] if ret_conv else res["x"]
         if ret_layer_results:
             feature = (feature, res["layer_results"])
-        return feature, torch.count_nonzero(res["padding_mask"], dim=-1)
+        return feature, res["padding_mask"]
 
 
 class ConvFeatureExtractionModel(nn.Module):

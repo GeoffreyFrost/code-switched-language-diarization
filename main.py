@@ -5,23 +5,16 @@ from trainer import Trainer, ExperimentConfig, TrainerConfig
 from models.lit_cs_detector import ModelConfig
 from setup import create_dfs
 
-def set_configs(args):
-
-    model_config = ModelConfig()
-    trainer_config = TrainerConfig()
-    experiment_config = ExperimentConfig()
-    
+def set_config(config, args):
     arg_fields = list(vars(args).keys())
+    for field in config.__dataclass_fields__: 
+        if field in arg_fields: setattr(config, field, vars(args)[field])
+    return config
 
-    for field in model_config.__dataclass_fields__: 
-        if field in arg_fields: setattr(model_config, field, vars(args)[field])
-
-    for field in trainer_config.__dataclass_fields__: 
-        if field in arg_fields: setattr(model_config, field, vars(args)[field])
-    
-    for field in experiment_config.__dataclass_fields__: 
-        if field in arg_fields: setattr(model_config, field, vars(args)[field])
-    
+def set_configs(args):
+    model_config = set_config(ModelConfig(), args)
+    trainer_config = set_config(TrainerConfig(), args)
+    experiment_config = set_config(ExperimentConfig(), args)
     return model_config, trainer_config, experiment_config
 
 def arg_paser():
