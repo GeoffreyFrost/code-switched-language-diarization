@@ -25,8 +25,8 @@ class ModelConfig():
     combine_intermediate:bool=False
     cross_attention:bool=True
     rnn_encoder:bool=False
-    soft_loss:bool=False
-    soft_loss_context:int=2
+    soft_units:bool=False
+    soft_units_context:int=2
     
 class LitCSDetector(pl.LightningModule):
     def __init__(self, learning_rate=1e-4, model_config=None):
@@ -41,8 +41,8 @@ class LitCSDetector(pl.LightningModule):
         self.combine_intermediate = model_config.combine_intermediate
         self.cross_attention = model_config.cross_attention
         self.rnn_encoder = model_config.rnn_encoder
-        self.soft_loss = model_config.soft_loss
-        self.soft_loss_context = model_config.soft_loss_context
+        self.soft_units = model_config.soft_units
+        self.soft_units_context = model_config.soft_units_context
 
         if self.combine_intermediate: factor = 2
         else: factor = 1
@@ -92,7 +92,7 @@ class LitCSDetector(pl.LightningModule):
 
         else: self.head = nn.Linear(embed_dim*factor, model_config.n_classes)
 
-        if self.soft_loss: self.soft_head = nn.Linear(model_config.n_classes + model_config.n_classes*2*model_config.soft_loss_context, 
+        if self.soft_units: self.soft_head = nn.Linear(model_config.n_classes + model_config.n_classes*2*model_config.soft_units_context, 
                                                 model_config.n_classes)
 
         if model_config.freeze_feature_extractor:
@@ -122,7 +122,7 @@ class LitCSDetector(pl.LightningModule):
         x = self.head(x)
 
         if self.current_epoch > 6 or overide:
-            x = cat_neighbors_for_soft_loss(x, self.model_config.soft_loss_context)
+            x = cat_neighbors_for_soft_units(x, self.model_config.soft_units_context)
             x = self.soft_head(x)
 
         return x, lengths
@@ -165,13 +165,13 @@ class LitCSDetector(pl.LightningModule):
         lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
         return {'optimizer':optimizer, 'lr_scheduler':lr_scheduler}
 
-def cat_neighbors_for_soft_loss(x, soft_loss_context):
+def cat_neighbors_for_soft_units(x, soft_units_context):
 
-    x_l = torch.zeros_like(x).repeat(1, 1, soft_loss_context)
-    x_r = torch.zeros_like(x).repeat(1, 1, soft_loss_context)
+    x_l = torch.zeros_like(x).repeat(1, 1, soft_units_context)
+    x_r = torch.zeros_like(x).repeat(1, 1, soft_units_context)
 
-    for i in range(soft_loss_context): x_l[:, i+1:, i*x.size(-1):(i+1)*x.size(-1)] = x[:, :-(i+1), :]
-    for i in range(soft_loss_context): x_r[:, :-(i+1), i*x.size(-1):(i+1)*x.size(-1)] = x[:, i+1:, :]
+    for i in range(soft_units_context): x_l[:, i+1:, i*x.size(-1):(i+1)*x.size(-1)] = x[:, :-(i+1), :]
+    for i in range(soft_units_context): x_r[:, :-(i+1), i*x.size(-1):(i+1)*x.size(-1)] = x[:, i+1:, :]
 
     return torch.cat([x, x_l, x_r], dim=-1)
 
