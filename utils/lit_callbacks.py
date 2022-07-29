@@ -1,6 +1,7 @@
 
 """Modified callbacks for pl"""
 
+from numpy import rec
 from pytorch_lightning.callbacks import BaseFinetuning
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from typing import Any, Callable, Dict, Optional
@@ -139,20 +140,31 @@ class BackboneFinetuning(BaseFinetuning):
                 )
 
 class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
-     def __init__(self, unfreeze_at_epoch=10):
+     def __init__(self, freeze_at_epoch=6, unfreeze_at_epoch=7):
          super().__init__()
+         self._freeze_at_epoch = freeze_at_epoch
          self._unfreeze_at_epoch = unfreeze_at_epoch
 
      def freeze_before_training(self, pl_module):
         # freeze any module you want
-         # Here, we are freezing `feature_extractor`
-         self.freeze(pl_module.backbone)
+        self.freeze(pl_module.soft_head)
 
      def finetune_function(self, pl_module, current_epoch, optimizer, optimizer_idx):
          # When `current_epoch` is 10, feature_extractor will start training.
-         if current_epoch == self._unfreeze_at_epoch:
-             self.unfreeze_and_add_param_group(
-                 modules=pl_module.backbone,
-                 optimizer=optimizer,
-                 train_bn=True,
-             )
+
+        if current_epoch == self._freeze_at_epoch:
+            for param in pl_module.backbone.parameters():
+                param.requires_grad = False
+
+            self.unfreeze_and_add_param_group(
+                initial_denom_lr=1,
+                modules=pl_module.soft_head,
+                optimizer=optimizer,
+                train_bn=True,
+                )
+
+        if current_epoch == self._unfreeze_at_epoch:
+            for param in pl_module.backbone.parameters():
+                param.requires_grad = True
+            for param in pl_module.backbone.feature_extractor.parameters():
+                param.requires_grad = False

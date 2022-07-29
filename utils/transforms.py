@@ -18,6 +18,11 @@ def interp_targets(targets, max_length):
     ds_targets = torch.round(F.interpolate(targets_, interp_legnths).squeeze())
     return ds_targets.to(torch.long)
 
+def powspace(start, stop, power, num):
+    start = torch.pow(torch.tensor(start), 1/float(power))
+    stop = torch.pow(torch.tensor(stop), 1/float(power))
+    return torch.pow( torch.linspace(start, stop, num), power)
+
 class SpecAugment():
     def __init__(self, feature_masking_percentage=0.05, time_masking_percentage=0.05, n_feature_masks=2, n_time_masks=2):
         self.feature_masking_percentage = feature_masking_percentage

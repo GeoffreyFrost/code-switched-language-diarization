@@ -1,10 +1,11 @@
 from dataclasses import dataclass
+from gc import freeze, unfreeze
 from utils.datasets import create_dataloaders, load_dfs
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from models.lit_cs_detector import LitCSDetector
-from utils.lit_callbacks import BackboneFinetuning
+from utils.lit_callbacks import BackboneFinetuning, FeatureExtractorFreezeUnfreeze
 from utils.modules import config_logger
 import pandas as pd
 import os
@@ -35,6 +36,7 @@ class Trainer():
         self.experimental_config = experimental_config
         self.supported_cs_pairs = ["engzul", "engxho", "engtsn", "engsot"]
         config_logger(model_config, trainer_config, experimental_config)
+        pl.seed_everything(42)
 
     def get_dfs(self):
         if self.experimental_config.cs_pair != 'all':
@@ -75,7 +77,7 @@ class Trainer():
                         gpus=1, 
                         gradient_clip_val=self.trainer_config.grad_clip_val, 
                         accumulate_grad_batches=self.trainer_config.accumulate_grad_batches, 
-                        log_every_n_steps=100, 
+                        log_every_n_steps=50, 
                         precision=self.trainer_config.precision)
 
         trainer.fit(self.model, train_dataloader, dev_dataloader)
@@ -92,6 +94,10 @@ class Trainer():
         callbacks = [learning_rate_callback, checkpoint_callback]
         if self.trainer_config.backbone_warmup==True: 
             callbacks.append(BackboneFinetuning(self.trainer_config.unfreeze_at_epoch, lambda epoch: 2))
+        if self.model_config.soft_units:
+            callbacks.append(FeatureExtractorFreezeUnfreeze(freeze_at_epoch=self.model_config.soft_unit_layer_train, 
+                                                        unfreeze_at_epoch=self.model_config.soft_unit_layer_train+1))
+
         return callbacks
 
     def compute_metrics():

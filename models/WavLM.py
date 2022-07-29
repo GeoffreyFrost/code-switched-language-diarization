@@ -328,6 +328,7 @@ class WavLM(nn.Module):
         ret_conv: bool = False,
         output_layer: Optional[int] = None,
         ret_layer_results: bool = False,
+        ret_lengths: bool = False
     ):
 
         if self.feature_grad_mult > 0:
@@ -372,7 +373,12 @@ class WavLM(nn.Module):
         feature = res["features"] if ret_conv else res["x"]
         if ret_layer_results:
             feature = (feature, res["layer_results"])
-        return feature, res["padding_mask"]
+
+        if ret_lengths: 
+            return feature,  feature.size(-2) - torch.count_nonzero(res["padding_mask"], dim=-1)
+
+        else: 
+            return feature, res["padding_mask"]
 
 
 class ConvFeatureExtractionModel(nn.Module):
@@ -576,7 +582,7 @@ class TransformerEncoder(nn.Module):
 
         x_conv = self.pos_conv(x.transpose(1, 2))
         x_conv = x_conv.transpose(1, 2)
-        x += x_conv
+        x + x + x_conv
 
         if not self.layer_norm_first:
             x = self.layer_norm(x)
