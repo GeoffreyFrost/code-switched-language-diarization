@@ -320,6 +320,41 @@ class WavLM(nn.Module):
         padding_mask = padding_mask.all(-1)
         return padding_mask
 
+    def custom_feature_extractor(
+        self,
+        source: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        mask: bool = False,
+    ):
+
+        if self.feature_grad_mult > 0:
+            features = self.feature_extractor(source)
+            if self.feature_grad_mult != 1.0:
+                features = GradMultiply.apply(features, self.feature_grad_mult)
+        else:
+            with torch.no_grad():
+                features = self.feature_extractor(source)
+
+        features = features.transpose(1, 2)
+        features = self.layer_norm(features)
+
+        if padding_mask is not None:
+            padding_mask = self.forward_padding_mask(features, padding_mask)
+
+        if self.post_extract_proj is not None:
+            features = self.post_extract_proj(features)
+
+        features = self.dropout_input(features)
+
+        if mask:
+            x, mask_indices = self.apply_mask(
+                features, padding_mask
+            )
+        else:
+            x = features
+        return x, padding_mask, x.size(-2) - torch.count_nonzero(padding_mask, dim=-1)
+
+
     def extract_features(
         self,
         source: torch.Tensor,
@@ -369,6 +404,34 @@ class WavLM(nn.Module):
         )
 
         res = {"x": x, "padding_mask": padding_mask, "features": features, "layer_results": layer_results}
+
+        feature = res["features"] if ret_conv else res["x"]
+        if ret_layer_results:
+            feature = (feature, res["layer_results"])
+
+        if ret_lengths: 
+            return feature,  feature.size(-2) - torch.count_nonzero(res["padding_mask"], dim=-1)
+
+        else: 
+            return feature, res["padding_mask"]
+
+
+    def transformer_encoder(
+        self,
+        x: torch.Tensor,
+        padding_mask: Optional[torch.Tensor] = None,
+        ret_conv: bool = False,
+        output_layer: Optional[int] = None,
+        ret_layer_results: bool = False,
+        ret_lengths: bool = False
+    ):
+        x, layer_results = self.encoder(
+            x,
+            padding_mask=padding_mask,
+            layer=None if output_layer is None else output_layer - 1
+        )
+
+        res = {"x": x, "padding_mask": padding_mask, "features": None, "layer_results": layer_results}
 
         feature = res["features"] if ret_conv else res["x"]
         if ret_layer_results:

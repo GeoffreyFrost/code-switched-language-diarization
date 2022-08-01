@@ -1,3 +1,4 @@
+from time import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,6 +23,79 @@ def powspace(start, stop, power, num):
     start = torch.pow(torch.tensor(start), 1/float(power))
     stop = torch.pow(torch.tensor(stop), 1/float(power))
     return torch.pow( torch.linspace(start, stop, num), power)
+
+class AudioTransforms():
+    def __init__(self, speed_min=0.9, speed_max=1.1, p_phone=0.5):
+        self.speed_min = speed_min
+        self.speed_max = speed_max
+        self.p_phone = p_phone
+
+    def forward(self, x):
+        effects = []
+        if torch.rand(1) > self.p_phone: 
+            effects.append(["lowpass", "4000"])
+            effects.append([       
+                        "compand",
+                        "0.02,0.05",
+                        "-60,-60,-30,-10,-20,-8,-5,-8,-2,-8",
+                        "-8",
+                        "-7",
+                        "0.05",
+                        ])
+            speed = (self.speed_max - self.speed_min) * torch.rand(1) + self.speed_max
+            effects.append(["speed", f'{float(speed)}'])
+            effects.append(["rate", "16000"])
+
+        x, sr = torchaudio.sox_effects.apply_effects_tensor(x, 16000, effects)
+
+        return x
+
+class MixUp():
+    def __init__(self, mixup_prob=0.25, mixup_size=0.2, beta=0.3):
+        self.mixup_size = mixup_size
+        self.mixup_prob = mixup_prob
+        self.beta_percentage = beta
+
+    def forward(self, x, lengths, y):
+        
+        time_param = int(lengths.min()*self.mixup_size)
+        if time_param < 1: return x, y
+        self.beta = (torch.rand(1) * self.beta_percentage).to(x.device).to(x.dtype)
+        
+        axis=1
+
+        value = torch.rand(1) * time_param
+        min_value = torch.rand(1) * (int(lengths.min()) - value)
+
+        mask_start = (min_value.long()).squeeze()
+        mask_end = (min_value.long() + value.long()).squeeze()
+        mask = torch.arange(0, x.shape[axis], device=x.device, dtype=x.dtype)
+        mask = (mask >= mask_start) & (mask < mask_end)
+
+        assert mask_end - mask_start < time_param
+
+        x, y = self.mixup(x, y, mask)
+
+        return x, y
+
+    def mixup(self, x, y, mask):
+
+        samples_to_apply_mixup = (torch.rand(x.size(0)) < self.mixup_prob).to(x.device)
+
+        if not samples_to_apply_mixup.any(): return x, y
+        
+        x_rolled = x.roll(1, 0)
+        y_rolled = y.roll(1, 0)
+        y_rolled = y_rolled.float()
+        y = y.float()
+        broadcast_indexs = samples_to_apply_mixup.unsqueeze(dim=-1).repeat(1, mask.size(0))
+        broadcast_masks = mask.repeat(samples_to_apply_mixup.size(0), 1)
+        index = torch.logical_and(broadcast_indexs, broadcast_masks)
+
+        x[index] = (1-self.beta)*x[index] + self.beta*x_rolled[index]
+        y[index] = (1-self.beta)*y[index] + self.beta*y_rolled[index]
+
+        return x, y
 
 class SpecAugment():
     def __init__(self, feature_masking_percentage=0.05, time_masking_percentage=0.05, n_feature_masks=2, n_time_masks=2):

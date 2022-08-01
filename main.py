@@ -36,10 +36,16 @@ def arg_paser():
     parser.add_argument('--freeze-feature-extractor', action='store_true')
     parser.add_argument('--soft-units', action='store_true')
     parser.add_argument('--fuzzy-cs-labels', action='store_true')
+    parser.add_argument('--custom-cross-entropy', action='store_true')
+    parser.add_argument('--mixup', action='store_true')
+    parser.add_argument('--audio-transforms', action='store_true')
 
     parser.set_defaults(freeze_feature_extractor=False)
     parser.set_defaults(soft_units=False)
     parser.set_defaults(fuzzy_cs_labels=False)
+    parser.set_defaults(custom_cross_entropy=False)
+    parser.set_defaults(mixup=False)
+    parser.set_defaults(audio_transforms=False)
 
     parser.add_argument('--cs-pair', default='all')
     parser.add_argument('--routine', default='semi-supervised')
