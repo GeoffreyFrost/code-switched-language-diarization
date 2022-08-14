@@ -104,17 +104,17 @@ def load_dfs(data_df_root_dir, cs_pair):
     return df_trn, df_dev
 
 
-def create_dataloaders(df_trn, df_dev, df_tst=None, bs=1):
+def create_dataloaders(df_trn, df_dev, df_tst=None, bs=1, num_workers=6):
 
     dataset_trn = CSDataset(df_trn)
     dataset_dev = CSDataset(df_dev)
     
-    train_dataloader = DataLoader(dataset_trn, batch_size=bs, shuffle=True, collate_fn=collator, num_workers=6)
-    dev_dataloader = DataLoader(dataset_dev, batch_size=bs, collate_fn=collator, num_workers=6)
+    train_dataloader = DataLoader(dataset_trn, batch_size=bs, shuffle=True, collate_fn=collator, num_workers=num_workers)
+    dev_dataloader = DataLoader(dataset_dev, batch_size=bs, collate_fn=collator, num_workers=num_workers)
 
     if df_tst != None:
         dataset_test = CSDataset(df_dev)
-        test_dataloader = DataLoader(dataset_test, batch_size=bs, collate_fn=collator, num_workers=6)
+        test_dataloader = DataLoader(dataset_test, batch_size=bs, collate_fn=collator, num_workers=num_workers)
         return  train_dataloader, dev_dataloader, test_dataloader
     
     return train_dataloader, dev_dataloader

@@ -10,7 +10,9 @@ import pytorch_lightning as pl
 import numpy as np
 from utils.transforms import interp_targets, powspace, SpecAugment, MixUp, AudioTransforms
 from models.WavLM import WavLM, WavLMConfig
+from models.modules.losses import CustomLabelSmoothingCrossEntropy, DeepClusteringLoss, smooth_labels
 from dataclasses import dataclass
+# from deepspeed.ops.adam import FusedAdam 
 
 @dataclass
 class ModelConfig():
@@ -20,8 +22,8 @@ class ModelConfig():
     wav2vec2_weight_decay:float = 0.1
     wavlm_weight_decay:float = 1e-4
     specaugment:bool=False
-    time_masking_percentage:float=0.02
-    feature_masking_percentage:float=0.02
+    time_masking_percentage:float=0.00
+    feature_masking_percentage:float=0.05
     n_feature_masks:int=2
     n_time_masks:int=2
     n_classes:int=2
@@ -32,16 +34,15 @@ class ModelConfig():
     soft_units:bool=False
     soft_unit_layer_train:int=4
     soft_units_context:int=2
-    cuda_device = torch.device("cuda:0" if torch.cuda.is_available else "cpu")
-    class_weights:torch.Tensor= torch.Tensor([1, 1, 1, 1, 1]).to(cuda_device)
     custom_cross_entropy:bool=False
     mixup:bool=False
     mixup_prob:float=1.0
     mixup_size:float=1.0
     beta:float=1.0
     audio_transforms:bool=True
-    speed_min:float=0.8
-    speed_max:float=1.2
+    speed_min:float=0.9
+    speed_max:float=1.1
+    dc:bool=False
 
 class LitCSDetector(pl.LightningModule):
     def __init__(self, learning_rate=1e-4, model_config=None):
@@ -56,9 +57,9 @@ class LitCSDetector(pl.LightningModule):
         self.soft_units = model_config.soft_units
         self.soft_units_context = model_config.soft_units_context
         self.soft_unit_layer_train = model_config.soft_unit_layer_train
-        self.class_wights = model_config.class_weights
         self.mixup = model_config.mixup
         self.audio_transforms = model_config.audio_transforms
+        self.dc = model_config.dc
 
         if model_config.custom_cross_entropy:
              self.custom_cross_entropy = CustomLabelSmoothingCrossEntropy(epsilon=model_config.label_smoothing)
@@ -111,6 +112,12 @@ class LitCSDetector(pl.LightningModule):
 
         self.head = nn.Linear(embed_dim*factor, model_config.n_classes)
 
+        if self.dc: 
+            self.dc_loss = DeepClusteringLoss()
+            self.dc_head = nn.Linear(embed_dim*factor, model_config.n_classes)
+            self.layer_norm = nn.LayerNorm(embed_dim) # NB for WavLM and DC loss
+            nn.init.xavier_uniform_(self.dc_head.weight, gain=1 / math.sqrt(2))
+
         if self.soft_units: 
             self.soft_head = nn.Linear(model_config.n_classes + model_config.n_classes*2*model_config.soft_units_context, 
                                                 model_config.n_classes)
@@ -119,42 +126,54 @@ class LitCSDetector(pl.LightningModule):
 
         nn.init.xavier_uniform_(self.head.weight, gain=1 / math.sqrt(2))
 
+        
+
         if model_config.freeze_feature_extractor:
             for param in self.backbone.feature_extractor.parameters():
                 param.requires_grad = False
 
     def forward(self, x, l, y=None, transforms=False, overide=False):
-        
+
         if self.audio_transforms and transforms: 
-            x = self.audio_transformer.forward(x.cpu()).to(x.device)
+            x, factor = self.audio_transformer.forward(x.cpu().to(torch.float32))
+            x = x.type_as(l)
             y = torch.round(interp_targets(y, x.size(-1)).float()).long()
+
+            # Correct sequence lengths
+            l = torch.round(l * factor)
+            l = l + x.size(-1) - torch.max(l)
 
         if self.model_config.backbone in ['wavlm-large']:
 
             padding_masks = get_padding_masks_from_length(x, l)
             x, padding_masks, lengths = self.backbone.custom_feature_extractor(x, padding_masks)
 
-            if self.mixup and transforms:
-
-                y = interp_targets(y, torch.max(lengths))
-                x, y = self.mixer.forward(x, 
-                                    lengths, 
-                                    F.one_hot(y.to(torch.long), num_classes=self.model_config.n_classes).float())
+            with torch.no_grad():
+                if self.mixup and transforms:
+                    y = interp_targets(y, torch.max(lengths))
+                    x, y = self.mixer.forward(x, 
+                                        lengths, 
+                                        F.one_hot(y.to(torch.long), num_classes=self.model_config.n_classes).float())
 
             if self.specaugment and transforms: x = self.spec_augmenter.forward(x)
 
-            x, lengths = self.backbone.transformer_encoder(x, padding_mask=padding_masks, ret_lengths=True)
-            # x, lengths = self.backbone.extract_features(x, padding_mask=padding_masks, ret_lengths=True) # OG 
+            x, lengths = self.backbone.transformer_encoder(x, padding_mask=padding_masks, ret_lengths=True, ret_layer_results=True, output_layer=24)
+            if self.dc: x, embeddings = x[0], self.layer_norm(x[1][-1][0].transpose(0, 1))
+            else: x, embeddings = x[0], x[0]
 
-        else: 
-
+        else:
+            
             x, lengths = self.backbone.feature_extractor(x, l)
-            if self.mixup and transforms: x, y = self.mixer.forward(x)
-            if self.specaugment and transforms: x = self.spec_augmenter.forward(x)
-            # Include intermediate layer for more syntactic infomation (wav2vec-U)
-            x = self.backbone.encoder(x, lengths)
 
-        # if self.mixup: x, y = self.mixer.forward(x) # Trying mixup after transformer encoder...
+            with torch.no_grad():
+                if self.mixup and transforms:
+                    y = interp_targets(y, torch.max(lengths))
+                    x, y = self.mixer.forward(x, 
+                                        lengths, 
+                                        F.one_hot(y.to(torch.long), num_classes=self.model_config.n_classes).float())
+
+            if self.specaugment and transforms: x = self.spec_augmenter.forward(x)
+            embeddings = self.backbone.encoder(x, lengths)
 
         x = self.head(x)
 
@@ -162,37 +181,50 @@ class LitCSDetector(pl.LightningModule):
             x = cat_neighbors_for_soft_units(x, self.model_config.soft_units_context)
             x = self.soft_head(x)
 
-        if self.mixup and transforms:
-            return x, lengths, y
+        if self.dc:
+            return x, self.dc_head(embeddings), lengths, y
 
-        else: return x, lengths, None
+        if self.mixup and transforms:
+            return x, embeddings, lengths, y
+
+        else: return x, embeddings, lengths, None
 
     def training_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
-        y_hat, lengths, y_interp = self.forward(x, x_l, y, transforms=True)
+        y_hat, emb, lengths, y_interp = self.forward(x, x_l, y, transforms=True)
         loss, y = aggregate_bce_loss(y_hat, y, y_interp, lengths, self.model_config, self.custom_cross_entropy)
-        self.log('train/loss', loss)
+
+        if self.dc:
+            idxs = get_unpadded_idxs(lengths)
+            dc_loss = self.dc_loss(emb.view(-1, emb.size(-1))[idxs], 
+                        smooth_labels(y.view(-1, self.model_config.n_classes), self.model_config.label_smoothing)[idxs])
+            self.log('train/dc_loss', dc_loss, sync_dist=True)
+            self.log('train/ce_loss', loss, sync_dist=True)
+
+            loss = 0.5*loss + 0.5*dc_loss
+
+        self.log('train/joint_loss', loss, sync_dist=True)
         return {'loss':loss, 'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':lengths.detach()}
     
     def training_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])] for x in out])
         y = torch.cat([x['y'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])]for x in out])
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
-        self.log("train/train_acc", accuracy, on_epoch=True)
+        self.log("train/train_acc", accuracy, on_epoch=True, sync_dist=True)
         gc.collect()
 
     def validation_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
-        y_hat, lengths, _ = self.forward(x, x_l, transforms=False)
+        y_hat, emb, lengths, _ = self.forward(x, x_l, transforms=False)
         loss, y = aggregate_bce_loss(y_hat, y, None, lengths, self.model_config, self.custom_cross_entropy)
-        self.log('val/loss', loss.detach().item())
+        self.log('val/loss', loss.detach().item(), sync_dist=True)
         return {'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':lengths.detach()}
 
     def validation_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])] for x in out])
         y = torch.cat([x['y'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])]for x in out])
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
-        self.log("val/val_acc", accuracy, on_epoch=True)
+        self.log("val/val_acc", accuracy, on_epoch=True, sync_dist=True)
 
     def configure_optimizers(self):
         # if self.model_config.backbone in ["wavlm-large"]:
@@ -201,6 +233,7 @@ class LitCSDetector(pl.LightningModule):
         #                                 momentum=0.9,
         #                                 weight_decay=self.weight_decay)
         # else:
+        #optimizer = FusedAdam(filter(lambda p: p.requires_grad, self.parameters()), lr=1, weight_decay=self.weight_decay)
         optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, self.parameters()), 
                                     lr=1, 
                                     weight_decay=self.weight_decay)
@@ -225,14 +258,14 @@ def cat_neighbors_for_soft_units(x, soft_units_context):
     return torch.cat([x, x_l, x_r], dim=-1)
 
 def get_padding_masks_from_length(source, lengths):
-    indexs = torch.arange(source.size(-1)).unsqueeze(dim=0).repeat(lengths.size(0), 1).to(lengths.device)
+    indexs = torch.arange(source.size(-1)).unsqueeze(dim=0).repeat(lengths.size(0), 1).type_as(lengths)
     lengths = lengths.unsqueeze(dim=-1).repeat(1, indexs.size(-1))
     padding_mask = indexs > lengths
     return padding_mask
 
 
 def get_attention_masks(lengths, max_len, nheads):
-    masks1d = (torch.arange(max_len).cuda()[None, :] > lengths[:, None]).repeat(nheads, 1).unsqueeze(dim=-1)
+    masks1d = (torch.arange(max_len).type_as(lengths)[None, :] > lengths[:, None]).repeat(nheads, 1).unsqueeze(dim=-1)
     masks1d = masks1d.float()
     masks2d = torch.matmul(masks1d,masks1d.transpose(-2, -1))
     return masks2d.bool()
@@ -257,10 +290,11 @@ def aggregate_bce_loss(y_hat, y, y_interp, lengths, cfg, custom_cross_entropy=No
         y = F.one_hot(y.to(torch.long), num_classes=cfg.n_classes).float()
 
     if custom_cross_entropy == None:
+
         loss = F.cross_entropy(y_hat.view(-1, cfg.n_classes)[idxs], 
                                 y.view(-1, cfg.n_classes)[idxs],
                                 label_smoothing=cfg.label_smoothing, 
-                                weight=cfg.class_weights)
+                                )
     else: 
         loss = custom_cross_entropy(y_hat.view(-1, cfg.n_classes)[idxs], 
                                 y.view(-1, cfg.n_classes)[idxs])
@@ -319,32 +353,9 @@ def rate(step, max_lr, factor, warmup):
     model_size = (max_lr / (warmup * warmup ** (-1.5)))**-2
     if step == 0:
         step = 1
-    return factor * (
-        model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5))
-    )
 
-# Based off Deep Learning, Goodfellow et al definition
-class CustomLabelSmoothingCrossEntropy(nn.Module):
-    def __init__(self, epsilon: float = 0.1, reduction='mean'):
-        """Custom cross entropy with label smoothing, which allows
-        for label smoothing to be applied to a ground truth distribution
-        IMPORTANT: Does not get same loss as torch w/ one-hot labels """
-        super().__init__()
-        self.epsilon = epsilon
-        self.reduction = reduction
-
-    def forward(self, preds, target):
-        if len(target.size()) < 2: F.one_hot(target)
-        n = target.size(-1)
-
-        max_probs, idxs = torch.max(target, dim=-1)
-        
-        residuals = max_probs * self.epsilon
-        norm_residuals = residuals / n
-
-        target[range(len(idxs)), idxs] = target[range(len(idxs)), idxs] - residuals
-        target = target + norm_residuals.unsqueeze(dim=-1).repeat(1, n)
-        # Commenting this out replicates troch's implementation
-        # target[range(len(idxs)), idxs] = target[range(len(idxs)), idxs] - norm_residuals
-        
-        return F.cross_entropy(preds, target)
+    lr = factor * (model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5)))
+    if step <= 6600:
+        return lr
+    if step > 6600:
+        return lr / 10

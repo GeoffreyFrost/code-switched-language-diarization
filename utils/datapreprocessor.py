@@ -57,6 +57,8 @@ class SoapiePreprocessor():
 
         return df_trn, df_dev, df_tst
 
+    
+
 def load_utt_tgts(sample_utt_id, lang_tgts_dir):
     spkr = sample_utt_id.split('_')[0]
     if not os.path.exists(os.path.join(lang_tgts_dir, f"{spkr}/{sample_utt_id}.txt")):

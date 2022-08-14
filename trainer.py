@@ -8,6 +8,7 @@ from models.lit_cs_detector import LitCSDetector
 from utils.lit_callbacks import BackboneFinetuning, FeatureExtractorFreezeUnfreeze
 from utils.modules import config_logger
 import pandas as pd
+import torch
 import os
 
 @dataclass
@@ -20,6 +21,7 @@ class TrainerConfig():
     unfreeze_at_epoch:int=1
     learning_rate:float=1e-4
     accumulate_grad_batches:int=8
+    resume_from_checkpoint=None
 
 @dataclass
 class ExperimentConfig():
@@ -63,7 +65,7 @@ class Trainer():
 
     def run_experiment(self):
         df_trn, df_dev = self.get_dfs()
-        train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, bs=self.trainer_config.batch_size)
+        train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, bs=self.trainer_config.batch_size, num_workers=4)
         self.callbacks = self.get_callbacks()
         self.model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
                         model_config=self.model_config)
@@ -74,11 +76,18 @@ class Trainer():
         trainer = pl.Trainer(logger=tb_logger, 
                         callbacks=self.callbacks, 
                         max_epochs=self.trainer_config.max_epochs, 
-                        gpus=1, 
-                        gradient_clip_val=self.trainer_config.grad_clip_val, 
-                        accumulate_grad_batches=self.trainer_config.accumulate_grad_batches, 
+                        # gpus=list(range(torch.cuda.device_count())), # Assumes we start at cuda 0
+                        gpus=[0],
+                        gradient_clip_val=self.trainer_config.grad_clip_val,
+                        accumulate_grad_batches = self.trainer_config.accumulate_grad_batches,
+                        #accumulate_grad_batches=int(self.trainer_config.accumulate_grad_batches / torch.cuda.device_count()), 
                         log_every_n_steps=50, 
-                        precision=self.trainer_config.precision)
+                        precision=self.trainer_config.precision,
+                        resume_from_checkpoint=None # TODO
+                        #strategy="ddp",
+                        #strategy='deepspeed_stage_3',
+                        #profiler="advanced"
+        )
 
         trainer.fit(self.model, train_dataloader, dev_dataloader)
 

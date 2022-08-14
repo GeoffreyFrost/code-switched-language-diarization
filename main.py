@@ -32,7 +32,7 @@ def arg_paser():
 
     parser.add_argument('--label-smoothing', default=0.1, type=float)
     parser.add_argument('--backbone', default='base')
-    parser.add_argument('--specaugment', default=False, type=bool)
+    parser.add_argument('--specaugment', action='store_true')
     parser.add_argument('--freeze-feature-extractor', action='store_true')
     parser.add_argument('--soft-units', action='store_true')
     parser.add_argument('--fuzzy-cs-labels', action='store_true')
@@ -40,6 +40,7 @@ def arg_paser():
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--audio-transforms', action='store_true')
 
+    parser.set_defaults(specaugment=False)
     parser.set_defaults(freeze_feature_extractor=False)
     parser.set_defaults(soft_units=False)
     parser.set_defaults(fuzzy_cs_labels=False)

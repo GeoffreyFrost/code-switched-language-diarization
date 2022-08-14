@@ -46,9 +46,13 @@ class AudioTransforms():
             effects.append(["speed", f'{float(speed)}'])
             effects.append(["rate", "16000"])
 
+        old_length = x.size(-1)
         x, sr = torchaudio.sox_effects.apply_effects_tensor(x, 16000, effects)
+        new_length = x.size(-1)
 
-        return x
+
+
+        return x, float(new_length)/float(old_length)
 
 class MixUp():
     def __init__(self, mixup_prob=0.25, mixup_size=0.2, beta=0.3):
@@ -60,7 +64,7 @@ class MixUp():
         
         time_param = int(lengths.min()*self.mixup_size)
         if time_param < 1: return x, y
-        self.beta = (torch.rand(1) * self.beta_percentage).to(x.device).to(x.dtype)
+        self.beta = (torch.rand(1) * self.beta_percentage).type_as(x).to(x.dtype)
         
         axis=1
 
@@ -80,7 +84,7 @@ class MixUp():
 
     def mixup(self, x, y, mask):
 
-        samples_to_apply_mixup = (torch.rand(x.size(0)) < self.mixup_prob).to(x.device)
+        samples_to_apply_mixup = (torch.rand(x.size(0)) < self.mixup_prob).type_as(x)
 
         if not samples_to_apply_mixup.any(): return x, y
         
@@ -109,8 +113,10 @@ class SpecAugment():
         time_mask_param = int(x.size(-2)*self.time_masking_percentage)
         freq_masking_transform = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)
         time_masking_transform = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param)
-        for i in range(self.n_feature_masks): x = freq_masking_transform(x)
-        for i in range(self.n_time_masks): x = time_masking_transform(x)
+        if freq_mask_param > 0:
+            for i in range(self.n_feature_masks): x = freq_masking_transform(x)
+        if time_mask_param > 0: 
+            for i in range(self.n_time_masks): x = time_masking_transform(x)
         return x
     
 def wav_specaugment(x, x_l, y=None):
@@ -145,5 +151,5 @@ def wav_specaugment(x, x_l, y=None):
     x_l = x_l - diff
     if y != None:
         y = interp_targets(y, x_prime.size(-1))
-        return x_prime.cuda(), x_l.cuda(), y.cuda()
-    return x_prime.cuda(), x_l.cuda()
+        return x_prime.type_as(x), x_l.type_as(x), y.type_as(x)
+    return x_prime.type_as(x), x_l.type_as(x)

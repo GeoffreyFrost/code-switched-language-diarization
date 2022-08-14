@@ -2,6 +2,7 @@ import csv
 import os
 import numpy as np
 import shutil
+import numpy as np
 
 def config_logger(model_config, trainer_config, experiment_config, log_dir='logs/configs/'):
 
@@ -15,13 +16,14 @@ def check_config_overlap(path1='logs/lightning_logs/', path2='logs/configs/'):
 
     exp_dirs = os.listdir(path1)
     config_dirs = os.listdir(path2)
-    exp_vers = set(strip_version_number(exp_dirs))
-    config_vers = set(strip_version_number(config_dirs))
+    exp_vers = strip_version_number(exp_dirs)
+    config_vers = strip_version_number(config_dirs)
     if len(config_vers)==0 or len(exp_vers)==0: return
-    configs_to_delete = config_vers - exp_vers
+    configs_to_delete = list(set(config_vers) - set(exp_vers))
+    # yields the elements in `list_2` that are NOT in `list_1`
     print(configs_to_delete)
     if len(configs_to_delete) == 0: return 
-    delete_indices = np.where(np.in1d(list(config_vers), list(configs_to_delete)))[0]
+    delete_indices = [config_vers.index(i) for i in configs_to_delete]
     for i in delete_indices: shutil.rmtree(os.path.join(path2, config_dirs[i]))
 
 def strip_version_number(versions):

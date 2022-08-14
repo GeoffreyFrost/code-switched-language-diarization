@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import LayerNorm
-from models.modules import (
+from models.modules.modules import (
     Fp32GroupNorm,
     Fp32LayerNorm,
     GradMultiply,
@@ -409,7 +409,10 @@ class WavLM(nn.Module):
         if ret_layer_results:
             feature = (feature, res["layer_results"])
 
-        if ret_lengths: 
+        if ret_lengths and ret_layer_results: 
+            return feature,  feature[0].size(-2) - torch.count_nonzero(res["padding_mask"], dim=-1)
+            
+        elif ret_lengths:
             return feature,  feature.size(-2) - torch.count_nonzero(res["padding_mask"], dim=-1)
 
         else: 
@@ -436,6 +439,9 @@ class WavLM(nn.Module):
         feature = res["features"] if ret_conv else res["x"]
         if ret_layer_results:
             feature = (feature, res["layer_results"])
+            
+        if ret_lengths and ret_layer_results: 
+            return feature,  feature[0].size(-2) - torch.count_nonzero(res["padding_mask"], dim=-1)
 
         if ret_lengths: 
             return feature,  feature.size(-2) - torch.count_nonzero(res["padding_mask"], dim=-1)
@@ -633,7 +639,10 @@ class TransformerEncoder(nn.Module):
     def forward(self, x, padding_mask=None, streaming_mask=None, layer=None):
         x, layer_results = self.extract_features(x, padding_mask, streaming_mask, layer)
 
-        if self.layer_norm_first and layer is None:
+        # if self.layer_norm_first and layer is None:
+        #     x = self.layer_norm(x)
+
+        if self.layer_norm_first:
             x = self.layer_norm(x)
 
         return x, layer_results
@@ -668,12 +677,13 @@ class TransformerEncoder(nn.Module):
                                        self_attn_mask=streaming_mask, pos_bias=pos_bias)
             if tgt_layer is not None:
                 layer_results.append((x, z))
-            if i == tgt_layer:
-                r = x
-                break
+                
+        #     if i == tgt_layer:
+        #         r = x
+        #         break
 
-        if r is not None:
-            x = r
+        # if r is not None:
+        #     x = r
 
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
