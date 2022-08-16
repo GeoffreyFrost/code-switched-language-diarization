@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 import random
 import torch
 import torchaudio
@@ -7,8 +8,10 @@ from torch.utils.data import DataLoader
 from datasets import Dataset, DatasetDict
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
+from tqdm import tqdm
 
 DS_FACTOR, ALPHA = 335, 0.49
+melspec_extractor = torchaudio.transforms.MelSpectrogram(n_fft=400, hop_length=160, n_mels=23)
 
 def down_sample_labels_fn(batch):
 
@@ -46,23 +49,26 @@ def dataset_dict(df_trn, df_dev, df_tst):
     return dataset
 
 class CSDataset(Dataset):
-    def __init__(self, df, transform=False):
-        self.transform = transform
+    def __init__(self, df, melspecs=False):
         self.df = df
-
-        #self.audio_path = dataset['audio_fpath']
-        #self.speech = dataset['speech']
-        #self.target = dataset['ds_tgts']
+        self.melspecs = melspecs
     
     def __len__(self):
         return len(self.df)
     
     def __getitem__(self, idx):
-        audio, sr = torchaudio.load(self.df.audio_fpath.iloc[idx])
-        #audio = self.speech[idx][0]
-        if self.transform:
-            pass
-        return audio[0], torch.tensor(self.df.tgts.iloc[idx], dtype=torch.long)
+        if not self.melspecs: 
+            audio, sr = torchaudio.load(self.df.audio_fpath.iloc[idx])
+            return audio[0], torch.tensor(self.df.tgts.iloc[idx], dtype=torch.long)
+        
+        else:
+            path = self.df.audio_fpath.iloc[idx].split('.')[0] + '.pt'
+            if not os.path.exists(path):
+                audio, sr = torchaudio.load(self.df.audio_fpath.iloc[idx])
+                melspec = torch.log10(melspec_extractor(audio))
+                # torch.save(melspec, path)
+
+                return melspec[0].T, torch.tensor(self.df.tgts.iloc[idx], dtype=torch.long)
 
 def collator(batch):
     
@@ -74,7 +80,7 @@ def collator(batch):
     xx_ll = torch.tensor(xx_ll, dtype=torch.float)
     yy_ll = torch.tensor(yy_ll, dtype=torch.float)
 
-    return pad_sequence(xx, batch_first=True), xx_ll, pad_sequence(yy, batch_first=True, padding_value=1), yy_ll
+    return pad_sequence(xx, batch_first=True), xx_ll, pad_sequence(yy, batch_first=True, padding_value=0), yy_ll
 
 def norm_binary_labels_func(x):
     x = norm_labels_func(x)
@@ -92,8 +98,9 @@ def read_pickle_df(path, norm_labels=True, binary_labels=True):
         else: df.tgts = df.tgts.map(norm_labels_func)       
     return df
 
-def load_dfs(data_df_root_dir, cs_pair):
-    if cs_pair == 'all': 
+def load_dfs(data_df_root_dir, cs_pair, all_cs_pairs=False):
+
+    if all_cs_pairs: 
         df_trn = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_trn.pkl"), binary_labels=False)
         df_dev = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_dev.pkl"), binary_labels=False)
     
@@ -103,17 +110,29 @@ def load_dfs(data_df_root_dir, cs_pair):
     
     return df_trn, df_dev
 
+def filter_mono_eng(df):
+    indexs = []
+    for tgts in tqdm(df.tgts): 
+        indexs.append(np.mean(tgts) > 0.0)
+    return df.loc[indexs]
 
-def create_dataloaders(df_trn, df_dev, df_tst=None, bs=1, num_workers=6):
+def filter_code_for_switched_only(df):
+    indexs = []
+    for tgts in tqdm(df.tgts): 
+        indexs.append(np.mean(np.absolute(np.gradient(tgts))) > 0.0)
+    return df.loc[indexs]
 
-    dataset_trn = CSDataset(df_trn)
-    dataset_dev = CSDataset(df_dev)
+
+def create_dataloaders(df_trn, df_dev, df_tst=None, melspecs=False, bs=1, num_workers=6):
+
+    dataset_trn = CSDataset(df_trn, melspecs=melspecs)
+    dataset_dev = CSDataset(df_dev, melspecs=melspecs)
     
     train_dataloader = DataLoader(dataset_trn, batch_size=bs, shuffle=True, collate_fn=collator, num_workers=num_workers)
     dev_dataloader = DataLoader(dataset_dev, batch_size=bs, collate_fn=collator, num_workers=num_workers)
 
     if df_tst != None:
-        dataset_test = CSDataset(df_dev)
+        dataset_test = CSDataset(df_dev, melspecs=melspecs)
         test_dataloader = DataLoader(dataset_test, batch_size=bs, collate_fn=collator, num_workers=num_workers)
         return  train_dataloader, dev_dataloader, test_dataloader
     

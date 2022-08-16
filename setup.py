@@ -16,8 +16,8 @@ def create_dfs(dataset_root_dir, override=False):
     if override==True: does_not_exist = ['engzul', 'engxho', 'engsot', 'engtsn']
     if len(does_not_exist): 
         print(f"Dataset dataframes do not exist for the following cs pairs: {does_not_exist}")
-        create = input("Do you want to create them (this might take a while)? [y/N] ")
-        create = create == 'y' or  create == 'Y' or create == 'yes' or create == 'Yes'
+        create = input("Do you want to create them (this might take a while)? [y/N] ").lower()
+        create = create == 'y' or create == 'yes'
         if create:
             for cs_pair in does_not_exist:
                 soapie_processor = SoapiePreprocessor('cs_'+cs_pair, os.path.join(dataset_root_dir, 'soapies_balanced_corpora'))

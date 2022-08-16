@@ -55,49 +55,66 @@ class AudioTransforms():
         return x, float(new_length)/float(old_length)
 
 class MixUp():
-    def __init__(self, mixup_prob=0.25, mixup_size=0.2, beta=0.3):
+    def __init__(self, mixup_prob=0.25, mixup_size=0.2, beta_min=0.0, beta_max=0.5):
         self.mixup_size = mixup_size
         self.mixup_prob = mixup_prob
-        self.beta_percentage = beta
+        self.beta_max = beta_max
+        self.beta_min = beta_min
 
     def forward(self, x, lengths, y):
         
         time_param = int(lengths.min()*self.mixup_size)
         if time_param < 1: return x, y
-        self.beta = (torch.rand(1) * self.beta_percentage).type_as(x).to(x.dtype)
+        self.beta = ((self.beta_max-self.beta_min)*torch.rand(1) + self.beta_max).type_as(x).to(x.dtype)
         
         axis=1
 
         value = torch.rand(1) * time_param
-        min_value = torch.rand(1) * (int(lengths.min()) - value)
+        # min_value = torch.rand(1) * (int(lengths.min()) - value)
 
-        mask_start = (min_value.long()).squeeze()
-        mask_end = (min_value.long() + value.long()).squeeze()
-        mask = torch.arange(0, x.shape[axis], device=x.device, dtype=x.dtype)
-        mask = (mask >= mask_start) & (mask < mask_end)
+        # mask_start = (min_value.long()).squeeze()
+        # mask_end = (min_value.long() + value.long()).squeeze()
+        # mask = torch.arange(0, x.shape[axis], device=x.device, dtype=x.dtype)
+        # mask = (mask >= mask_start) & (mask < mask_end)
 
-        assert mask_end - mask_start < time_param
+        # assert mask_end - mask_start < time_param
 
-        x, y = self.mixup(x, y, mask)
+        x, y = self.mixup(x, y, lengths, value)
 
         return x, y
 
-    def mixup(self, x, y, mask):
+    def mixup(self, x, y, lengths, value):
 
-        samples_to_apply_mixup = (torch.rand(x.size(0)) < self.mixup_prob).type_as(x)
-
+        samples_to_apply_mixup = (torch.rand(x.size(0)) < self.mixup_prob)
         if not samples_to_apply_mixup.any(): return x, y
-        
+
+        indexs = torch.arange(0, x.size(0)).type_as(x).long()
+        indexs_rolled = indexs.roll(1, 0)
         x_rolled = x.roll(1, 0)
         y_rolled = y.roll(1, 0)
         y_rolled = y_rolled.float()
         y = y.float()
-        broadcast_indexs = samples_to_apply_mixup.unsqueeze(dim=-1).repeat(1, mask.size(0))
-        broadcast_masks = mask.repeat(samples_to_apply_mixup.size(0), 1)
-        index = torch.logical_and(broadcast_indexs, broadcast_masks)
 
-        x[index] = (1-self.beta)*x[index] + self.beta*x_rolled[index]
-        y[index] = (1-self.beta)*y[index] + self.beta*y_rolled[index]
+        # broadcast_indexs = samples_to_apply_mixup.unsqueeze(dim=-1).repeat(1, mask.size(0))
+        # broadcast_masks = mask.repeat(samples_to_apply_mixup.size(0), 1)
+        # index = torch.logical_and(broadcast_indexs, broadcast_masks)
+
+        for i in indexs:
+            if samples_to_apply_mixup[i]:
+                min_value = torch.rand(1) * (int(lengths[i]) - value)
+                mask_start = (min_value.long()).squeeze()
+                mask_end = (min_value.long() + value.long()).squeeze()
+
+                min_value = torch.rand(1) * (int(lengths[indexs_rolled[i]]) - value)
+                mask_start_r = (min_value.long()).squeeze()
+                mask_end_r = (min_value.long() + value.long()).squeeze()
+
+                x[i, mask_start:mask_end] = (1-self.beta)*x[i, mask_start:mask_end] + self.beta*x_rolled[i, mask_start_r:mask_end_r]
+                y[i, mask_start:mask_end] = (1-self.beta)*y[i, mask_start:mask_end] + self.beta*y_rolled[i, mask_start_r:mask_end_r]
+
+        #     x[index]
+        # x[index] = (1-self.beta)*x[index] + self.beta*x_rolled[index]
+        # y[index] = (1-self.beta)*y[index] + self.beta*y_rolled[index]
 
         return x, y
 

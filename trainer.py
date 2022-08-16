@@ -1,14 +1,17 @@
 from dataclasses import dataclass
 from gc import freeze, unfreeze
-from utils.datasets import create_dataloaders, load_dfs
+from utils.datasets import create_dataloaders, filter_mono_eng, load_dfs, filter_code_for_switched_only
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from models.lit_cs_detector import LitCSDetector
+from models.lit_blstm_e2e import LitBLSTME2E
 from utils.lit_callbacks import BackboneFinetuning, FeatureExtractorFreezeUnfreeze
 from utils.modules import config_logger
 import pandas as pd
 import torch
+import torch.nn as nn
+import math
 import os
 
 @dataclass
@@ -21,10 +24,13 @@ class TrainerConfig():
     unfreeze_at_epoch:int=1
     learning_rate:float=1e-4
     accumulate_grad_batches:int=8
-    resume_from_checkpoint=None
+    resume_from_checkpoint:str=None
 
 @dataclass
 class ExperimentConfig():
+    no_mono_eng:bool=False
+    filter_cs:bool=False
+    baseline:str=None
     cs_pair:str='all'
     routine:str='semi-supervised'
     n_refinement_stages:int=5
@@ -51,29 +57,62 @@ class Trainer():
             for cs_pair in self.supported_cs_pairs:
                 data_df_root_dir = os.path.join(self.experimental_config.data_dir, \
                     f"soapies_balanced_corpora/cs_{cs_pair}_balanced/lang_targs_mult/")
-                df_trn, df_dev = load_dfs(data_df_root_dir, cs_pair)
+                df_trn, df_dev = load_dfs(data_df_root_dir, cs_pair, True)
                 dfs_trn.append(df_trn)
                 dfs_dev.append(df_dev)
             df_trn = pd.concat(dfs_trn)
             df_dev = pd.concat(dfs_dev)
+
             self.model_config.n_classes = len(self.supported_cs_pairs) + 1
 
         d = pd.Series(df_dev.audio_fpath)
         t = pd.Series(df_trn.audio_fpath)
         assert d.isin(t).any() == False # Sanity check that splits are indeed clean
+        
+        print(f'Number of training samples: {len(df_trn)}')
+
+        if self.experimental_config.no_mono_eng:
+            df_trn = filter_mono_eng(df_trn)
+
+        if self.experimental_config.filter_cs:
+            df_trn = filter_code_for_switched_only(df_trn)
+        
+        print(f'Number of filtered training samples: {len(df_trn)}')
+
         return df_trn, df_dev
 
     def run_experiment(self):
         df_trn, df_dev = self.get_dfs()
-        train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, bs=self.trainer_config.batch_size, num_workers=4)
+        
+        if self.experimental_config.baseline != None: melspecs=True # Baselines use melspecs
+        else: melspecs=False
+
+        train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, melspecs=melspecs, bs=self.trainer_config.batch_size, num_workers=4)
+        # train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, melspecs=melspecs, bs=self.trainer_config.batch_size, num_workers=1)
         self.callbacks = self.get_callbacks()
-        self.model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
-                        model_config=self.model_config)
+        self.load_model()
         self.train(train_dataloader, dev_dataloader)
+
+    def load_model(self):
+
+        if self.experimental_config.baseline != None:
+            assert self.experimental_config.baseline in ['blstm']
+            if self.experimental_config.baseline == 'blstm':
+                self.model = LitBLSTME2E(self.model_config)
+
+        else: 
+            self.model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
+                model_config=self.model_config)
+
+            ckpt = torch.load('logs/lightning_logs/version_66/checkpoints/15-0.00-0.00.ckpt')
+            self.model.load_state_dict(ckpt['state_dict'])
+            self.model.head = nn.Linear(1024, self.model_config.n_classes) # re-initialize head
+            nn.init.xavier_uniform_(self.head.weight, gain=1 / math.sqrt(2))
+            
 
     def train(self, train_dataloader, dev_dataloader):
         tb_logger = pl_loggers.TensorBoardLogger(save_dir="logs/")
-        trainer = pl.Trainer(logger=tb_logger, 
+        trainer = pl.Trainer(logger=tb_logger,
                         callbacks=self.callbacks, 
                         max_epochs=self.trainer_config.max_epochs, 
                         # gpus=list(range(torch.cuda.device_count())), # Assumes we start at cuda 0
@@ -83,9 +122,8 @@ class Trainer():
                         #accumulate_grad_batches=int(self.trainer_config.accumulate_grad_batches / torch.cuda.device_count()), 
                         log_every_n_steps=50, 
                         precision=self.trainer_config.precision,
-                        resume_from_checkpoint=None # TODO
                         #strategy="ddp",
-                        #strategy='deepspeed_stage_3',
+                        # strategy='deepspeed_stage_3',
                         #profiler="advanced"
         )
 

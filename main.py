@@ -7,7 +7,7 @@ from setup import create_dfs
 
 def set_config(config, args):
     arg_fields = list(vars(args).keys())
-    for field in config.__dataclass_fields__: 
+    for field in config.__dataclass_fields__:
         if field in arg_fields: setattr(config, field, vars(args)[field])
     return config
 
@@ -39,6 +39,7 @@ def arg_paser():
     parser.add_argument('--custom-cross-entropy', action='store_true')
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--audio-transforms', action='store_true')
+    parser.add_argument('--weight-decay', default=None, type=float)
 
     parser.set_defaults(specaugment=False)
     parser.set_defaults(freeze_feature_extractor=False)
@@ -48,6 +49,9 @@ def arg_paser():
     parser.set_defaults(mixup=False)
     parser.set_defaults(audio_transforms=False)
 
+    parser.add_argument('--no-mono-eng', default=False, action='store_true')
+    parser.add_argument('--filter-cs', default=False, action='store_true')
+    parser.add_argument('--baseline', default=None)
     parser.add_argument('--cs-pair', default='all')
     parser.add_argument('--routine', default='semi-supervised')
     parser.add_argument('--n-refinement-stages', default=5, type=int)
@@ -63,6 +67,7 @@ if __name__ == '__main__':
     model_config, trainer_config, experiment_config = set_configs(args)
     # Do setup check
     create_dfs(args.dataset_path)
+    print(args.weight_decay)
     # Train
     trainer = Trainer(model_config, trainer_config, experiment_config)
     trainer.run_experiment()

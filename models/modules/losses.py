@@ -47,7 +47,7 @@ class DeepClusteringLoss(nn.Module):
         super(DeepClusteringLoss, self).__init__()
 
     def forward(self, output, target):
-        # target = nn.functional.one_hot(target).float()
+        if len(target.shape) < 3: target = F.one_hot(target.to(torch.int64)).type_as(output)
         num_frames = output.size()[0]
         vt_v = torch.norm(torch.matmul(torch.transpose(output, 0, 1), output), p=2) ** 2
         vt_y = torch.norm(torch.matmul(torch.transpose(output, 0, 1), target), p=2) ** 2

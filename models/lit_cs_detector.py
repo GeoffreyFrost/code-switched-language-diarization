@@ -21,6 +21,7 @@ class ModelConfig():
     label_smoothing:float=0.1
     wav2vec2_weight_decay:float = 0.1
     wavlm_weight_decay:float = 1e-4
+    weight_decay:float = None
     specaugment:bool=False
     time_masking_percentage:float=0.00
     feature_masking_percentage:float=0.05
@@ -36,9 +37,10 @@ class ModelConfig():
     soft_units_context:int=2
     custom_cross_entropy:bool=False
     mixup:bool=False
-    mixup_prob:float=1.0
+    mixup_prob:float=0.75
     mixup_size:float=1.0
-    beta:float=1.0
+    beta_max:float=0.8
+    beta_min:float=1.0
     audio_transforms:bool=True
     speed_min:float=0.9
     speed_max:float=1.1
@@ -72,8 +74,9 @@ class LitCSDetector(pl.LightningModule):
 
         if self.mixup: self.mixer=MixUp(
                             mixup_prob=model_config.mixup_prob, 
-                            mixup_size=model_config.mixup_size, 
-                            beta=model_config.beta)
+                            mixup_size=model_config.mixup_size,
+                            beta_min=model_config.beta_min,
+                            beta_max=model_config.beta_max)
 
         if self.specaugment: self.spec_augmenter=SpecAugment(
                                     feature_masking_percentage=model_config.feature_masking_percentage,
@@ -87,6 +90,9 @@ class LitCSDetector(pl.LightningModule):
         # Diffrent weight decays for wav2vec2 and wavlm
         if self.model_config.backbone in ["base","large", "xlsr"]: self.weight_decay = model_config.wav2vec2_weight_decay
         elif self.model_config.backbone in ["wavlm-large"]: self.weight_decay = model_config.wavlm_weight_decay
+
+        if model_config.weight_decay != None: self.weight_decay = model_config.weight_decay
+
 
         if model_config.backbone == "base":
             bundle = torchaudio.pipelines.WAV2VEC2_BASE
@@ -173,7 +179,8 @@ class LitCSDetector(pl.LightningModule):
                                         F.one_hot(y.to(torch.long), num_classes=self.model_config.n_classes).float())
 
             if self.specaugment and transforms: x = self.spec_augmenter.forward(x)
-            embeddings = self.backbone.encoder(x, lengths)
+            x = self.backbone.encoder(x, lengths)
+            embeddings = x
 
         x = self.head(x)
 
@@ -293,7 +300,8 @@ def aggregate_bce_loss(y_hat, y, y_interp, lengths, cfg, custom_cross_entropy=No
 
         loss = F.cross_entropy(y_hat.view(-1, cfg.n_classes)[idxs], 
                                 y.view(-1, cfg.n_classes)[idxs],
-                                label_smoothing=cfg.label_smoothing, 
+                                label_smoothing=cfg.label_smoothing,
+                                # weight=torch.tensor([1, 2, 2, 2, 2]).type_as(y_hat)
                                 )
     else: 
         loss = custom_cross_entropy(y_hat.view(-1, cfg.n_classes)[idxs], 
