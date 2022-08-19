@@ -28,6 +28,7 @@ def arg_paser():
     parser.add_argument('--learning-rate', default=5e-5, type=float)
     parser.add_argument('--backbone-warmup', action='store_true')
     parser.add_argument('--unfreeze-at-epoch', default=1, type=int)
+    parser.add_argument('--gpus', nargs='+', type=int, default=[0])
     parser.set_defaults(backbone_warmup=False)
 
     parser.add_argument('--label-smoothing', default=0.1, type=float)
@@ -39,7 +40,9 @@ def arg_paser():
     parser.add_argument('--custom-cross-entropy', action='store_true')
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--audio-transforms', action='store_true')
+    parser.add_argument('--class-weights', default=False, action='store_true')
     parser.add_argument('--weight-decay', default=None, type=float)
+    parser.add_argument('--dc', default=False, action='store_true')
 
     parser.set_defaults(specaugment=False)
     parser.set_defaults(freeze_feature_extractor=False)
@@ -50,14 +53,13 @@ def arg_paser():
     parser.set_defaults(audio_transforms=False)
 
     parser.add_argument('--no-mono-eng', default=False, action='store_true')
+    parser.add_argument('--lang-fams', default=False, action='store_true')
+    parser.add_argument('--pretrained-lang-fams', default=False, action='store_true')
     parser.add_argument('--filter-cs', default=False, action='store_true')
     parser.add_argument('--baseline', default=None)
     parser.add_argument('--cs-pair', default='all')
-    parser.add_argument('--routine', default='semi-supervised')
-    parser.add_argument('--n-refinement-stages', default=5, type=int)
-    parser.add_argument('--unlabeled-ratio', default=0.2, type=float)
-
     parser.add_argument('--dataset_path', default='/home/gfrost/datasets')
+
     return parser
 
 if __name__ == '__main__':
@@ -67,7 +69,7 @@ if __name__ == '__main__':
     model_config, trainer_config, experiment_config = set_configs(args)
     # Do setup check
     create_dfs(args.dataset_path)
-    print(args.weight_decay)
+    print(args.gpus)
     # Train
     trainer = Trainer(model_config, trainer_config, experiment_config)
     trainer.run_experiment()

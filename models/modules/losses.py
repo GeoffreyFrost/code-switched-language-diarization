@@ -39,8 +39,9 @@ class CustomLabelSmoothingCrossEntropy(nn.Module):
         if len(target.size()) < 2: F.one_hot(target)
         
         target = smooth_labels(target, self.epsilon)
-        
-        return F.cross_entropy(preds, target)
+        preds = F.log_softmax(preds, dim=-1)
+        # return -1*(torch.mean(sample_weights*torch.bmm(target.unsqueeze(dim=-2), preds.unsqueeze(dim=-1)).squeeze()))
+        return -1*(torch.mean(torch.bmm(target.unsqueeze(dim=-2), preds.unsqueeze(dim=-1)).squeeze()))
 
 class DeepClusteringLoss(nn.Module):
     def __init__(self):

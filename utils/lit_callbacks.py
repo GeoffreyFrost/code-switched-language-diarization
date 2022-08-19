@@ -2,7 +2,7 @@
 """Modified callbacks for pl"""
 
 from numpy import rec
-from pytorch_lightning.callbacks import BaseFinetuning
+from pytorch_lightning.callbacks import BaseFinetuning, Callback
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from typing import Any, Callable, Dict, Optional
 from torch.optim.optimizer import Optimizer
@@ -168,3 +168,19 @@ class FeatureExtractorFreezeUnfreeze(BaseFinetuning):
                 param.requires_grad = True
             for param in pl_module.backbone.feature_extractor.parameters():
                 param.requires_grad = False
+
+class GradNormCallback(Callback):
+    """
+    Logs the gradient norm.
+    """
+    def on_after_backward(self, trainer, model):
+        model.log("other/grad_norm", gradient_norm(model))
+
+def gradient_norm(model):
+    total_norm = 0.0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1. / 2)
+    return total_norm

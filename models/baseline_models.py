@@ -42,12 +42,12 @@ class BLSTM_E2E_LID(nn.Module):
     def forward(self, x):
         # embedding block: stacked BiLSTM+Linear+Tanh+normalize)
         output, _ = self.embedding_layer(x)
-        output_ = output.data
-        embedding = F.normalize(torch.tanh(self.embedding_fc(output_)))
-        # output block: stacked BiLSTM+Linear+Sigmoid
+        embedding = F.normalize(torch.tanh(self.embedding_fc(output.data)))
+        # # output block: stacked BiLSTM+Linear+Sigmoid
         output, _ = self.blstm_layer(output)
-        output_ = output.data
-        output = torch.sigmoid(self.output_fc(output_))
+        # print(output.data.shape)
+        output = torch.sigmoid(self.output_fc(output.data))
+        # print(output.shape)
         return output.view(-1,self.num_classes), embedding
 
 # SA-E2E
@@ -59,7 +59,7 @@ class Transformer_E2E_LID(nn.Module):
         super(Transformer_E2E_LID, self).__init__()
         self.transform = nn.Linear(input_dim, feat_dim)
         self.layernorm1 = LayerNorm(feat_dim)
-        self.pos_encoding = PositionalEncoding(max_seq_len=max_seq_len, features_dim=256, device=device)
+        self.pos_encoding = PositionalEncoding(max_seq_len=max_seq_len, features_dim=256)
         self.layernorm2 = LayerNorm(feat_dim)
         self.attention_block1 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
         self.attention_block2 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
@@ -108,7 +108,7 @@ class X_Transformer_E2E_LID(nn.Module):
         self.fc7 = nn.Linear(feat_dim, n_lang)
         # attention module
         self.layernorm1 = LayerNorm(feat_dim)
-        self.pos_encoding = PositionalEncoding(max_seq_len=max_seq_len, features_dim=256, device=device)
+        self.pos_encoding = PositionalEncoding(max_seq_len=max_seq_len, features_dim=256)
         self.layernorm2 = LayerNorm(feat_dim)
         self.attention_block1 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
         self.attention_block2 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
@@ -143,7 +143,7 @@ class X_Transformer_E2E_LID(nn.Module):
 
         embedding = embedding.view(batch_size, T_len, self.feat_dim) # embedding:[B*T,feat_dim]=>[B, T, feat_dim]
         output = self.layernorm1(embedding)
-        output = self.pos_encoding(output,seq_len)
+        output = self.pos_encoding(output)
         output = self.layernorm2(output)
         output, _ = self.attention_block1(output, atten_mask)
         output, _ = self.attention_block2(output, atten_mask)

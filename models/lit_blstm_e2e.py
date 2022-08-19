@@ -9,17 +9,17 @@ from models.modules.losses import DeepClusteringLoss
 import gc
 
 loss_func_DCL = DeepClusteringLoss().to('cuda')
-loss_func_CRE = nn.CrossEntropyLoss().to('cuda')
-alpha = 1
+loss_func_CRE = nn.CrossEntropyLoss(label_smoothing=0.1).to('cuda')
+alpha = 0.5
 
 class LitBLSTME2E(pl.LightningModule):
     def __init__(self, model_config):
         super().__init__()
-
+        self.save_hyperparameters()
         self.model_config = model_config
         
         self.encoder = BLSTM_E2E_LID(
-                            input_dim=23, # 23 dim mel-spectrograms
+                            input_dim=437, # 19 * 23 dim mel-spectrograms
                             n_lang=model_config.n_classes,
                             dropout=0.25,
                             hidden_size=256,
@@ -35,7 +35,7 @@ class LitBLSTME2E(pl.LightningModule):
     def training_step(self, batch, batch_idx):
 
         x, x_l, y, y_l = batch
-        y = interp_targets(y, x.size(-2))
+        # y = interp_targets(y, x.size(-2))
         
         # copy pasta
         x_ = rnn_util.pack_padded_sequence(x, x_l.cpu(), batch_first=True, enforce_sorted=False)
@@ -45,7 +45,6 @@ class LitBLSTME2E(pl.LightningModule):
 
         loss_DCL = loss_func_DCL(embeddings, y_)
         loss_CRE = loss_func_CRE(y_hat, y_)
-
         loss = alpha * loss_CRE + (1 - alpha) * loss_DCL
 
         self.log('train/joint_loss', loss, sync_dist=True)
@@ -62,7 +61,7 @@ class LitBLSTME2E(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
 
         x, x_l, y, y_l = batch
-        y = interp_targets(y, x.size(-2))
+        # y = interp_targets(y, x.size(-2))
 
         # copy pasta
         x_ = rnn_util.pack_padded_sequence(x, x_l.cpu(), batch_first=True, enforce_sorted=False)
@@ -70,10 +69,10 @@ class LitBLSTME2E(pl.LightningModule):
 
         y_hat, embeddings = self.forward(x_)
 
-        loss_DCL = loss_func_DCL(embeddings, y_)
+        # loss_DCL = loss_func_DCL(embeddings, y_)
         loss_CRE = loss_func_CRE(y_hat, y_)
-
-        loss = alpha * loss_CRE + (1 - alpha) * loss_DCL
+        loss = loss_CRE
+        # loss = alpha * loss_CRE + (1 - alpha) * loss_DCL
         self.log('val/loss', loss.detach().item(), sync_dist=True)
         
         return {'y_hat':y_hat.detach(), 'y':y_.detach(), 'lengths':x_l.detach()}
@@ -81,17 +80,12 @@ class LitBLSTME2E(pl.LightningModule):
     def validation_epoch_end(self, out):
         y_hat = torch.cat([x['y_hat'] for x in out])
         y = torch.cat([x['y'] for x in out])
-        print(y.max())
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y).sum().float() / float(y.size(0))
         self.log("val/val_acc", accuracy, on_epoch=True, sync_dist=True)
 
     def configure_optimizers(self):
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=120)
 
         return {'optimizer':optimizer, 'lr_scheduler':{'scheduler':lr_scheduler, 'interval':'epoch'}}
-
-# def get_unpadded_idxs(lengths):
-#     max_len = torch.max(lengths)
-#     return torch.cat([torch.arange(max_len*i, max_len*i+l) for i, l in enumerate(lengths)]).to(torch.long)

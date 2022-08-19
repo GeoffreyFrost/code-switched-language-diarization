@@ -29,8 +29,8 @@ class ModelConfig():
     n_time_masks:int=2
     n_classes:int=2
     fuzzy_cs_labels:bool=False
-    buffer_length:int=9
-    buffer_lower_bound:float=0.8
+    buffer_length:int=4
+    buffer_lower_bound:float=0.7
     ord:float=0.25
     soft_units:bool=False
     soft_unit_layer_train:int=4
@@ -39,12 +39,13 @@ class ModelConfig():
     mixup:bool=False
     mixup_prob:float=0.75
     mixup_size:float=1.0
-    beta_max:float=0.8
-    beta_min:float=1.0
+    beta_max:float=1.0
+    beta_min:float=0.0
     audio_transforms:bool=True
     speed_min:float=0.9
     speed_max:float=1.1
     dc:bool=False
+    class_weights:bool=False
 
 class LitCSDetector(pl.LightningModule):
     def __init__(self, learning_rate=1e-4, model_config=None):
@@ -62,6 +63,8 @@ class LitCSDetector(pl.LightningModule):
         self.mixup = model_config.mixup
         self.audio_transforms = model_config.audio_transforms
         self.dc = model_config.dc
+
+        model_config.weight=torch.tensor([1, 1, 1.2, 1.5, 1.5])
 
         if model_config.custom_cross_entropy:
              self.custom_cross_entropy = CustomLabelSmoothingCrossEntropy(epsilon=model_config.label_smoothing)
@@ -85,11 +88,11 @@ class LitCSDetector(pl.LightningModule):
                                     n_time_masks=model_config.n_time_masks
                                     )
 
-        assert model_config.backbone in ["base","large", "xlsr", "wavlm-large"], f'model: {model_config.backbone} not supported.'
+        assert model_config.backbone in ["base","large", "xlsr", "wavlm-large",  "wavlm-base"], f'model: {model_config.backbone} not supported.'
 
         # Diffrent weight decays for wav2vec2 and wavlm
         if self.model_config.backbone in ["base","large", "xlsr"]: self.weight_decay = model_config.wav2vec2_weight_decay
-        elif self.model_config.backbone in ["wavlm-large"]: self.weight_decay = model_config.wavlm_weight_decay
+        elif self.model_config.backbone in ["wavlm-large", "wavlm-base"]: self.weight_decay = model_config.wavlm_weight_decay
 
         if model_config.weight_decay != None: self.weight_decay = model_config.weight_decay
 
@@ -115,6 +118,13 @@ class LitCSDetector(pl.LightningModule):
             self.backbone = WavLM(cfg)
             self.backbone.load_state_dict(checkpoint['model'])
             embed_dim = 1024
+
+        if model_config.backbone == "wavlm-base":
+            checkpoint = torch.load('/home/gfrost/projects/penguin/models/WavLM-Base.pt')
+            cfg = WavLMConfig(checkpoint['cfg'])
+            self.backbone = WavLM(cfg)
+            self.backbone.load_state_dict(checkpoint['model'])
+            embed_dim = 768
 
         self.head = nn.Linear(embed_dim*factor, model_config.n_classes)
 
@@ -149,7 +159,7 @@ class LitCSDetector(pl.LightningModule):
             l = torch.round(l * factor)
             l = l + x.size(-1) - torch.max(l)
 
-        if self.model_config.backbone in ['wavlm-large']:
+        if self.model_config.backbone in ['wavlm-large', 'wavlm-base']:
 
             padding_masks = get_padding_masks_from_length(x, l)
             x, padding_masks, lengths = self.backbone.custom_feature_extractor(x, padding_masks)
@@ -162,10 +172,12 @@ class LitCSDetector(pl.LightningModule):
                                         F.one_hot(y.to(torch.long), num_classes=self.model_config.n_classes).float())
 
             if self.specaugment and transforms: x = self.spec_augmenter.forward(x)
+            
+            x, lengths = self.backbone.transformer_encoder(x, padding_mask=padding_masks, ret_lengths=True)
 
-            x, lengths = self.backbone.transformer_encoder(x, padding_mask=padding_masks, ret_lengths=True, ret_layer_results=True, output_layer=24)
-            if self.dc: x, embeddings = x[0], self.layer_norm(x[1][-1][0].transpose(0, 1))
-            else: x, embeddings = x[0], x[0]
+            if self.dc: embeddings = x
+            #if self.dc: x, embeddings = x[0], self.layer_norm(x[1][-1][0].transpose(0, 1))
+            # else: x, embeddings = x[0], x[0]
 
         else:
             
@@ -179,8 +191,9 @@ class LitCSDetector(pl.LightningModule):
                                         F.one_hot(y.to(torch.long), num_classes=self.model_config.n_classes).float())
 
             if self.specaugment and transforms: x = self.spec_augmenter.forward(x)
+
+            if self.dc: embeddings = x
             x = self.backbone.encoder(x, lengths)
-            embeddings = x
 
         x = self.head(x)
 
@@ -192,9 +205,9 @@ class LitCSDetector(pl.LightningModule):
             return x, self.dc_head(embeddings), lengths, y
 
         if self.mixup and transforms:
-            return x, embeddings, lengths, y
+            return x, None, lengths, y
 
-        else: return x, embeddings, lengths, None
+        else: return x, None, lengths, None
 
     def training_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
@@ -297,11 +310,10 @@ def aggregate_bce_loss(y_hat, y, y_interp, lengths, cfg, custom_cross_entropy=No
         y = F.one_hot(y.to(torch.long), num_classes=cfg.n_classes).float()
 
     if custom_cross_entropy == None:
-
         loss = F.cross_entropy(y_hat.view(-1, cfg.n_classes)[idxs], 
                                 y.view(-1, cfg.n_classes)[idxs],
                                 label_smoothing=cfg.label_smoothing,
-                                # weight=torch.tensor([1, 2, 2, 2, 2]).type_as(y_hat)
+                                weight=cfg.weight.type_as(y_hat) if cfg.class_weights else None
                                 )
     else: 
         loss = custom_cross_entropy(y_hat.view(-1, cfg.n_classes)[idxs], 
