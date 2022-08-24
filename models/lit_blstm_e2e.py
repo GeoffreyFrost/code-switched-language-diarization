@@ -9,17 +9,17 @@ from models.modules.losses import DeepClusteringLoss
 import gc
 
 loss_func_DCL = DeepClusteringLoss().to('cuda')
-loss_func_CRE = nn.CrossEntropyLoss(label_smoothing=0.1).to('cuda')
+loss_func_CRE = nn.CrossEntropyLoss(ignore_index=255, label_smoothing=0.1).to('cuda')
 alpha = 0.5
 
 class LitBLSTME2E(pl.LightningModule):
-    def __init__(self, model_config):
+    def __init__(self, model_config, experiment_config):
         super().__init__()
         self.save_hyperparameters()
         self.model_config = model_config
         
         self.encoder = BLSTM_E2E_LID(
-                            input_dim=437, # 19 * 23 dim mel-spectrograms
+                            input_dim = 23 if experiment_config.flatten_melspecs else 437, # 19 * 23 dim mel-spectrograms
                             n_lang=model_config.n_classes,
                             dropout=0.25,
                             hidden_size=256,
@@ -38,6 +38,7 @@ class LitBLSTME2E(pl.LightningModule):
         # y = interp_targets(y, x.size(-2))
         
         # copy pasta
+        # y = interp_targets(y, x.size(1))
         x_ = rnn_util.pack_padded_sequence(x, x_l.cpu(), batch_first=True, enforce_sorted=False)
         y_ = rnn_util.pack_padded_sequence(y, x_l.cpu(), batch_first=True, enforce_sorted=False).data.to(x.device)
 
@@ -62,8 +63,8 @@ class LitBLSTME2E(pl.LightningModule):
 
         x, x_l, y, y_l = batch
         # y = interp_targets(y, x.size(-2))
-
         # copy pasta
+        # y = interp_targets(y, x.size(1))
         x_ = rnn_util.pack_padded_sequence(x, x_l.cpu(), batch_first=True, enforce_sorted=False)
         y_ = rnn_util.pack_padded_sequence(y, x_l.cpu(), batch_first=True, enforce_sorted=False).data.to(x.device)
 
@@ -82,6 +83,17 @@ class LitBLSTME2E(pl.LightningModule):
         y = torch.cat([x['y'] for x in out])
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y).sum().float() / float(y.size(0))
         self.log("val/val_acc", accuracy, on_epoch=True, sync_dist=True)
+
+    def predict_step(self, batch, batch_idx):
+        x, x_l, y, y_l = batch
+
+        self.eval()
+        with torch.no_grad():
+            y = rnn_util.pack_padded_sequence(y, x_l.cpu(), batch_first=True, enforce_sorted=False).data.to(x.device)
+            x = rnn_util.pack_padded_sequence(x, x_l.cpu(), batch_first=True, enforce_sorted=False)
+            y_hat, _ = self.forward(x)
+            
+        return {'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':x_l.detach()}
 
     def configure_optimizers(self):
 

@@ -31,8 +31,11 @@ class TrainerConfig():
 
 @dataclass
 class ExperimentConfig():
+    final:bool=False
+    flatten_melspecs:bool=False
     no_mono_eng:bool=False
     filter_cs:bool=False
+    eng_other:bool=False
     lang_fams:bool=False
     pretrained_lang_fams:bool=False
     pretrained_eng_other:bool=True
@@ -61,7 +64,9 @@ class Trainer():
                 data_df_root_dir = os.path.join(self.experimental_config.data_dir, \
                     f"soapies_balanced_corpora/cs_{cs_pair}_balanced/lang_targs_mult/")
 
-                df_trn, df_dev = load_dfs(data_df_root_dir, cs_pair, all_cs_pairs=True, lang_fams=self.experimental_config.lang_fams)
+                df_trn, df_dev = load_dfs(data_df_root_dir, cs_pair, all_cs_pairs=True, 
+                                        eng_other=self.experimental_config.eng_other,
+                                        lang_fams=self.experimental_config.lang_fams)
 
                 dfs_trn.append(df_trn)
                 dfs_dev.append(df_dev)
@@ -92,20 +97,26 @@ class Trainer():
         df_trn, df_dev = self.get_dfs()
         
         if self.experimental_config.baseline == 'blstm': melspecs, stack_frames = True, True
-        if self.experimental_config.baseline == 'xsa': melspecs, stack_frames = True, False
-        else: melspecs=False
+        elif self.experimental_config.baseline == 'xsa': melspecs, stack_frames = True, False
+        else: melspecs, stack_frames = False, False
         
-        train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, melspecs=melspecs, stack_frames=stack_frames,
-                                                            bs=self.trainer_config.batch_size, num_workers=4)
+        train_dataloader, dev_dataloader = create_dataloaders(df_trn, df_dev, 
+                                                            melspecs=melspecs, 
+                                                            stack_frames=stack_frames,
+                                                            flatten_melspecs=self.experimental_config.flatten_melspecs,
+                                                            bs=self.trainer_config.batch_size, 
+                                                            num_workers=4)
         self.callbacks = self.get_callbacks()
         self.load_model()
         self.train(train_dataloader, dev_dataloader)
 
     def load_model(self):
         if self.experimental_config.baseline != None:
+            self.model_config.backbone = self.experimental_config.baseline
             assert self.experimental_config.baseline in ['blstm', 'xsa']
+
             if self.experimental_config.baseline == 'blstm':
-                self.model = LitBLSTME2E(self.model_config)
+                self.model = LitBLSTME2E(self.model_config, self.experimental_config)
             if self.experimental_config.baseline == 'xsa':
                 self.model = LitXSAE2E(self.model_config)
 
@@ -113,16 +124,24 @@ class Trainer():
             self.model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
                 model_config=self.model_config)
 
-            if self.experimental_config.pretrained_eng_other:
-                ckpt = torch.load('logs/pretrained_models/eng-other/checkpoints/15-0.00-0.00.ckpt')
-                self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
-            
-            if self.experimental_config.pretrained_lang_fams: 
-                ckpt = torch.load('logs/pretrained_models/lang-fams/checkpoints/7-0.00-0.00.ckpt')
-                self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
+        if self.experimental_config.pretrained_eng_other:
+            log_path  = f'logs/final/{self.model_config.backbone}/lightning_logs/version_0/'
+            print(log_path)
+            ckpt = torch.load(get_checkpoint_path(log_path))
+            self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
+        
+        if self.experimental_config.pretrained_lang_fams:
+            log_path  = f'logs/final/{self.model_config.backbone}/lightning_logs/version_1/'
+            ckpt = torch.load(get_checkpoint_path(log_path))
+            self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
 
     def train(self, train_dataloader, dev_dataloader):
-        tb_logger = pl_loggers.TensorBoardLogger(save_dir="logs/")
+        
+        if self.experimental_config.final: 
+            log_dir = f"logs/final/{self.model_config.backbone}"
+        else: log_dir = "logs/"
+
+        tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)
         trainer = pl.Trainer(logger=tb_logger,
                         callbacks=self.callbacks, 
                         max_epochs=self.trainer_config.max_epochs,
@@ -156,13 +175,28 @@ class Trainer():
 
         return callbacks
 
-    def compute_metrics():
-        pass
+def get_checkpoint_path(root):
+    for root, dirs, files in os.walk(root, topdown=False):
+        for file in files:
+            if file.split('.')[-1] == 'ckpt' and file.split('.')[0] != 'last' and file.split('.')[0] != 'kek':
+                return os.path.join(root, file)
 
 def load_pretrained_weights(model, ckpt, model_config):
     model.load_state_dict(ckpt['state_dict'])
-    model.head = nn.Linear(list(model.backbone.encoder.parameters())[-1].shape[0], model_config.n_classes) # re-initialize head
-    nn.init.xavier_uniform_(model.head.weight, gain=1 / math.sqrt(2))
+
+    if model_config.backbone == 'blstm': 
+        model.encoder.head = nn.Linear(512, model_config.n_classes) # re-initialize head
+        nn.init.xavier_uniform_(model.encoder.head.weight, gain=1 / math.sqrt(2))
+
+    elif model_config.backbone == 'xsa': 
+        model.encoder.head = nn.Linear(256, model_config.n_classes) 
+        nn.init.xavier_uniform_(model.encoder.head.weight, gain=1 / math.sqrt(2))
+
+    else: 
+        emb_dim = list(model.backbone.encoder.parameters())[-1].shape[0]
+        model.head = nn.Linear(emb_dim, model_config.n_classes)
+        nn.init.xavier_uniform_(model.head.weight, gain=1 / math.sqrt(2))
+
     return model
 
 def tracked_gradient_global_only():
@@ -172,5 +206,4 @@ def tracked_gradient_global_only():
             norms= dict(filter(lambda elem: '_total' in elem[0], norms.items()))
             return norms
         return f
-
     pl.core.grads.GradInformation.grad_norm = remove_per_weight_norms(pl.core.grads.GradInformation.grad_norm)

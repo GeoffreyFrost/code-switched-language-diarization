@@ -134,7 +134,7 @@ class LitCSDetector(pl.LightningModule):
             self.layer_norm = nn.LayerNorm(embed_dim) # NB for WavLM and DC loss
             nn.init.xavier_uniform_(self.dc_head.weight, gain=1 / math.sqrt(2))
 
-        if self.soft_units: 
+        if self.soft_units:
             self.soft_head = nn.Linear(model_config.n_classes + model_config.n_classes*2*model_config.soft_units_context, 
                                                 model_config.n_classes)
 
@@ -211,6 +211,7 @@ class LitCSDetector(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
+        y = replace_label_pad_token(y)
         y_hat, emb, lengths, y_interp = self.forward(x, x_l, y, transforms=True)
         loss, y = aggregate_bce_loss(y_hat, y, y_interp, lengths, self.model_config, self.custom_cross_entropy)
 
@@ -235,6 +236,7 @@ class LitCSDetector(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, x_l, y, y_l = batch
+        y = replace_label_pad_token(y)
         y_hat, emb, lengths, _ = self.forward(x, x_l, transforms=False)
         loss, y = aggregate_bce_loss(y_hat, y, None, lengths, self.model_config, self.custom_cross_entropy)
         self.log('val/loss', loss.detach().item(), sync_dist=True)
@@ -245,6 +247,19 @@ class LitCSDetector(pl.LightningModule):
         y = torch.cat([x['y'].view(-1, self.model_config.n_classes)[get_unpadded_idxs(x['lengths'])]for x in out])
         accuracy = (torch.softmax(y_hat, dim=-1).argmax(dim=-1) == y.argmax(dim=-1)).sum().float() / float(y.size(0))
         self.log("val/val_acc", accuracy, on_epoch=True, sync_dist=True)
+
+    def predict_step(self, batch, batch_idx):
+
+        x, x_l, y, y_l = batch
+        y = replace_label_pad_token(y)
+        self.eval()
+        with torch.no_grad():
+            y_hat, _, lengths, _ = self.forward(x, x_l, transforms=False)
+
+        y = interp_targets(y, torch.max(lengths))
+        #loss, y = aggregate_bce_loss(y_hat, y, None, lengths, self.model_config, self.custom_cross_entropy)
+
+        return {'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':lengths.detach()}
 
     def configure_optimizers(self):
         # if self.model_config.backbone in ["wavlm-large"]:
@@ -379,3 +394,7 @@ def rate(step, max_lr, factor, warmup):
         return lr
     if step > 6600:
         return lr / 10
+
+def replace_label_pad_token(y):
+    y[y == 255] = 0
+    return y

@@ -95,28 +95,12 @@ class MixUp():
                 mask_start_r = (min_value.long()).squeeze()
                 mask_end_r = (min_value.long() + value.long()).squeeze()
 
-                # I don't have time to debug why this randomly fails half way through training
+                # I don't have time to debug why this randomly fails once half way through training
                 try:
                     x[i, mask_start:mask_end] = (1-self.beta)*x[i, mask_start:mask_end] + self.beta*x_rolled[i, mask_start_r:mask_end_r]
                     y[i, mask_start:mask_end] = (1-self.beta)*y[i, mask_start:mask_end] + self.beta*y_rolled[i, mask_start_r:mask_end_r]
 
-                except:
-                    pass 
-                    # axis=1
-
-                    # mask_start = (min_value.long()).squeeze()
-                    # mask_end = (min_value.long() + value.long()).squeeze()
-                    # mask = torch.arange(0, x.shape[axis], device=x.device, dtype=x.dtype)
-                    # mask = (mask >= mask_start) & (mask < mask_end)
-
-                    # broadcast_indexs = samples_to_apply_mixup.unsqueeze(dim=-1).repeat(1, mask.size(0))
-                    # broadcast_masks = mask.repeat(samples_to_apply_mixup.size(0), 1)
-                    # index = torch.logical_and(broadcast_indexs, broadcast_masks)
-
-                    # x[index] = (1-self.beta)*x[index] + self.beta*x_rolled[index]
-                    # y[index] = (1-self.beta)*y[index] + self.beta*y_rolled[index]
-
-                 # assert torch.mean(torch.mean(y, axis=-1), axis=-2).all() == 1
+                except: pass 
         return x, y
 
 class SpecAugment():

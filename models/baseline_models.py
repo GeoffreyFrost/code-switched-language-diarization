@@ -1,3 +1,4 @@
+from this import d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,16 +38,17 @@ class BLSTM_E2E_LID(nn.Module):
                                    dropout=self.dropout,
                                    batch_first=True,
                                    bidirectional=True)
-        self.output_fc = nn.Linear(self.hidden_size*2, self.num_classes)
-
+        self.head = nn.Linear(self.hidden_size*2, self.num_classes)
+        self.layer_norm = nn.LayerNorm(self.hidden_size*2)
     def forward(self, x):
         # embedding block: stacked BiLSTM+Linear+Tanh+normalize)
         output, _ = self.embedding_layer(x)
+        
         embedding = F.normalize(torch.tanh(self.embedding_fc(output.data)))
         # # output block: stacked BiLSTM+Linear+Sigmoid
         output, _ = self.blstm_layer(output)
         # print(output.data.shape)
-        output = torch.sigmoid(self.output_fc(output.data))
+        output = self.head(output.data)
         # print(output.shape)
         return output.view(-1,self.num_classes), embedding
 
@@ -77,7 +79,7 @@ class Transformer_E2E_LID(nn.Module):
         output, _ = self.attention_block2(output, atten_mask)
         output, _ = self.attention_block3(output, atten_mask)
         output, _ = self.attention_block4(output, atten_mask)
-        output = self.sigmoid(self.output_fc(output))
+        output = self.output_fc(output)
         return output
 
 
@@ -114,7 +116,7 @@ class X_Transformer_E2E_LID(nn.Module):
         self.attention_block2 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
         self.attention_block3 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
         self.attention_block4 = EncoderBlock(feat_dim, d_k, d_v, d_ff, n_heads, dropout=dropout)
-        self.output_fc = nn.Linear(feat_dim, n_lang)
+        self.head = nn.Linear(feat_dim, n_lang)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, seq_len, atten_mask, eps=1e-5):
@@ -149,5 +151,11 @@ class X_Transformer_E2E_LID(nn.Module):
         output, _ = self.attention_block2(output, atten_mask)
         output, _ = self.attention_block3(output, atten_mask)
         output, _ = self.attention_block4(output, atten_mask)
-        output = self.sigmoid(self.output_fc(output))
+        output = self.head(output)
         return output, cnn_output
+
+def get_padding_masks_from_length(source, lengths):
+    indexs = torch.arange(source.size(-2)).unsqueeze(dim=0).repeat(lengths.size(0), 1).type_as(lengths)
+    lengths = lengths.unsqueeze(dim=-1).repeat(1, source.size(-2))
+    padding_mask = indexs > lengths
+    return padding_mask

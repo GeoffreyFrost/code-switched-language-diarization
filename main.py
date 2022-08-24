@@ -43,6 +43,7 @@ def arg_paser():
     parser.add_argument('--class-weights', default=False, action='store_true')
     parser.add_argument('--weight-decay', default=None, type=float)
     parser.add_argument('--dc', default=False, action='store_true')
+    parser.add_argument('--flatten-melspecs', default=False, action='store_true')
 
     parser.set_defaults(specaugment=False)
     parser.set_defaults(freeze_feature_extractor=False)
@@ -52,8 +53,11 @@ def arg_paser():
     parser.set_defaults(mixup=False)
     parser.set_defaults(audio_transforms=False)
 
+    parser.add_argument('--final', default=False, action='store_true')
+    parser.add_argument('--eng-other', default=False, action='store_true')
     parser.add_argument('--no-mono-eng', default=False, action='store_true')
     parser.add_argument('--lang-fams', default=False, action='store_true')
+    parser.add_argument('--pretrained-eng-other', default=False, action='store_true')
     parser.add_argument('--pretrained-lang-fams', default=False, action='store_true')
     parser.add_argument('--filter-cs', default=False, action='store_true')
     parser.add_argument('--baseline', default=None)
@@ -70,6 +74,7 @@ if __name__ == '__main__':
     # Do setup check
     create_dfs(args.dataset_path)
     print(args.gpus)
+    print(args.backbone)
     # Train
     trainer = Trainer(model_config, trainer_config, experiment_config)
     trainer.run_experiment()

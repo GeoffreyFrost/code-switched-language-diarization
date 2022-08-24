@@ -51,15 +51,17 @@ def dataset_dict(df_trn, df_dev, df_tst):
     return dataset
 
 class CSDataset(Dataset):
-    def __init__(self, df, melspecs=False, stack_frames=False):
+    def __init__(self, df, melspecs=False, stack_frames=False, flatten_melspecs=False):
         self.df = df
         self.melspecs = melspecs
         self.stack_frames = stack_frames
+        self.flatten_melspecs = flatten_melspecs
     
     def __len__(self):
         return len(self.df)
     
     def __getitem__(self, idx):
+
         if not self.melspecs: 
             audio, sr = torchaudio.load(self.df.audio_fpath.iloc[idx])
             return audio[0], torch.tensor(self.df.tgts.iloc[idx], dtype=torch.long)
@@ -76,9 +78,9 @@ class CSDataset(Dataset):
 
             y = torch.tensor(self.df.tgts.iloc[idx], dtype=torch.float)
             y = interp_targets(y, melspec.size(0))
-
-            if self.stack_frames: melspec, y = stack_melspecs(melspec, y) # T,input_dim*K
-            else: melspec, y = part_segments(melspec, y) # T,input_dim,K
+            if self.flatten_melspecs: return melspec, y # T, input_dim
+            elif self.stack_frames: melspec, y = stack_melspecs(melspec, y) # T//K,feat_dim*K
+            else: melspec, y = part_segments(melspec, y) # T//K,feat_dim,K
 
             return melspec, y
 
@@ -103,6 +105,18 @@ def stack_melspecs(melspec, y):
     y = y[:max_len].unsqueeze(-1).view(-1, 19)
     y = torch.mode(y, dim=-1).values.long()
     return melspec, y
+
+def collator_t(batch):
+    
+    xx = [s[0] for s in batch]
+    xx_ll = [len(s[0]) for s in batch]
+    yy = [s[1] for s in batch]
+    yy_ll = [len(s[1]) for s in batch]
+
+    xx_ll = torch.tensor(xx_ll, dtype=torch.float)
+    yy_ll = torch.tensor(yy_ll, dtype=torch.float)
+
+    return pad_sequence(xx, batch_first=True), xx_ll, pad_sequence(yy, batch_first=True, padding_value=0), yy_ll
 
 def collator(batch):
     
@@ -141,11 +155,15 @@ def read_pickle_df(path, lang_fams=False, norm_labels=True, binary_labels=True):
 
     return df
 
-def load_dfs(data_df_root_dir, cs_pair, lang_fams=False, all_cs_pairs=False):
+def load_dfs(data_df_root_dir, cs_pair, eng_other=False, lang_fams=False, all_cs_pairs=False):
 
     if lang_fams: 
         df_trn = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_trn.pkl"), lang_fams=True)
         df_dev = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_dev.pkl"), lang_fams=True)
+
+    elif eng_other:
+        df_trn = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_trn.pkl"), binary_labels=True)
+        df_dev = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_dev.pkl"), binary_labels=True)
 
     elif all_cs_pairs: 
         df_trn = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_trn.pkl"), binary_labels=False)
@@ -156,6 +174,19 @@ def load_dfs(data_df_root_dir, cs_pair, lang_fams=False, all_cs_pairs=False):
         df_dev = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_dev.pkl"))
     
     return df_trn, df_dev
+
+def load_test_dfs(data_df_root_dir, cs_pair, eng_other=False, lang_fams=False, all_cs_pairs=False):
+
+    if lang_fams: 
+        df_tst = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_tst.pkl"), lang_fams=True)
+
+    elif eng_other:
+        df_tst = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_tst.pkl"), binary_labels=True)
+
+    else:
+        df_tst = read_pickle_df(os.path.join(data_df_root_dir, f"cs_{cs_pair}_tst.pkl"), binary_labels=False)
+    
+    return df_tst
 
 def filter_mono_eng(df):
     indexs = []
@@ -169,18 +200,22 @@ def filter_code_for_switched_only(df):
         indexs.append(np.mean(np.absolute(np.gradient(tgts))) > 0.0)
     return df.loc[indexs]
 
+def create_test_dataloader(df_tst, flatten_melspecs=False, melspecs=False, stack_frames=False, bs=1, num_workers=6):
+    dataset_tst = CSDataset(df_tst, melspecs=melspecs, stack_frames=stack_frames, flatten_melspecs=flatten_melspecs)
+    tst_dataloader = DataLoader(dataset_tst, batch_size=bs, collate_fn=collator_t, num_workers=num_workers)
+    return tst_dataloader
+    
+def create_dataloaders(df_trn, df_dev, flatten_melspecs=False, melspecs=False, stack_frames=False, bs=1, num_workers=6):
 
-def create_dataloaders(df_trn, df_dev, df_tst=None, melspecs=False, stack_frames=False, bs=1, num_workers=6):
-
-    dataset_trn = CSDataset(df_trn, melspecs=melspecs, stack_frames=stack_frames)
-    dataset_dev = CSDataset(df_dev, melspecs=melspecs, stack_frames=stack_frames)
+    dataset_trn = CSDataset(df_trn, melspecs=melspecs, stack_frames=stack_frames, flatten_melspecs=flatten_melspecs)
+    dataset_dev = CSDataset(df_dev, melspecs=melspecs, stack_frames=stack_frames, flatten_melspecs=flatten_melspecs)
     
     train_dataloader = DataLoader(dataset_trn, batch_size=bs, shuffle=True, collate_fn=collator, num_workers=num_workers)
     dev_dataloader = DataLoader(dataset_dev, batch_size=bs, collate_fn=collator, num_workers=num_workers)
 
-    if df_tst != None:
-        dataset_test = CSDataset(df_dev, melspecs=melspecs)
-        test_dataloader = DataLoader(dataset_test, batch_size=bs, collate_fn=collator, num_workers=num_workers)
-        return  train_dataloader, dev_dataloader, test_dataloader
+    # if df_tst != None:
+    #     dataset_test = CSDataset(df_dev, melspecs=melspecs)
+    #     test_dataloader = DataLoader(dataset_test, batch_size=bs, collate_fn=collator, num_workers=num_workers)
+    #     return  train_dataloader, dev_dataloader, test_dataloader
     
     return train_dataloader, dev_dataloader
