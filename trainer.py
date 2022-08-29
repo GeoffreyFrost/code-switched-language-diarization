@@ -124,21 +124,36 @@ class Trainer():
             self.model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
                 model_config=self.model_config)
 
+            pretrained = self.experimental_config.pretrained_eng_other or self.experimental_config.pretrained_lang_fams
+            self.load_pt(pretrained)
+
+
+    def load_pt(self, pretrained):
+        if pretrained:
+            log_path = self.get_pt_log_path()
+            ckpt = torch.load(get_checkpoint_path(log_path))
+            self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
+
+    def get_pt_log_path(self):
+
         if self.experimental_config.pretrained_eng_other:
-            log_path  = f'logs/final/{self.model_config.backbone}/lightning_logs/version_0/'
-            print(log_path)
-            ckpt = torch.load(get_checkpoint_path(log_path))
-            self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
-        
+            log_path  = f'logs/final/{self.get_log_model_name()}/lightning_logs/version_0/'
+
         if self.experimental_config.pretrained_lang_fams:
-            log_path  = f'logs/final/{self.model_config.backbone}/lightning_logs/version_1/'
-            ckpt = torch.load(get_checkpoint_path(log_path))
-            self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
+            log_path  = f'logs/final/{self.get_log_model_name()}/lightning_logs/version_1/'
+
+        return log_path
+
+    def get_log_model_name(self):
+        if self.experimental_config.final and not self.model_config.mixup:
+            log_model_name = self.model_config.backbone + '-no-mixup'
+        else: log_model_name = self.model_config.backbone
+        return log_model_name
 
     def train(self, train_dataloader, dev_dataloader):
         
         if self.experimental_config.final: 
-            log_dir = f"logs/final/{self.model_config.backbone}"
+            log_dir = f"logs/final/{self.get_log_model_name()}"
         else: log_dir = "logs/"
 
         tb_logger = pl_loggers.TensorBoardLogger(save_dir=log_dir)

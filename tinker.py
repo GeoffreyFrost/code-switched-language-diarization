@@ -1,7 +1,6 @@
 import numpy as np
 from pyannote.metrics.diarization import DiarizationErrorRate
 from pyannote.core import Annotation, Segment
-from test import DER
 import torch
 if __name__ == "__main__":
 
@@ -19,7 +18,7 @@ if __name__ == "__main__":
     
     metric = DiarizationErrorRate(collar=5)
 
-    print(metric(reference, hypothesis))
+    print(abs(metric(reference, hypothesis)))
 
     unbatched_labels=[torch.ones(50,), torch.zeros(50,)]
     unbatched_preds =[torch.cat([torch.zeros(25,), torch.ones(25,)]), torch.cat([torch.zeros(25,), torch.ones(25,)])]

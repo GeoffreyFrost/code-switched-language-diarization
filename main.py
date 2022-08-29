@@ -32,6 +32,8 @@ def arg_paser():
     parser.set_defaults(backbone_warmup=False)
 
     parser.add_argument('--label-smoothing', default=0.1, type=float)
+    parser.add_argument('--lr-warmup-steps', default=1000, type=int)
+    parser.add_argument('--no-ssl-pretrain', default=False, action='store_true')
     parser.add_argument('--backbone', default='base')
     parser.add_argument('--specaugment', action='store_true')
     parser.add_argument('--freeze-feature-extractor', action='store_true')

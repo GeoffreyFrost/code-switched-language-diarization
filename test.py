@@ -1,4 +1,5 @@
 import argparse
+from re import I
 from models.lit_cs_detector import LitCSDetector, get_unpadded_idxs
 from models.lit_blstm_e2e import LitBLSTME2E
 from models.lit_x_transformer_e2e import LitXSAE2E
@@ -75,24 +76,67 @@ def compute_predictions(model_name, model, tst_dataloader):
 def get_predictions(model_name, diarization_config, model, tst_dataloader):
 
     path = f'logs/results/{model_name}_predictions_dcfg_{diarization_config}.pt'
-    # if os.path.exists(path): 
-    #     y_hat, y, out = torch.load(path)
-    # else: 
-    y_hat, y, out = compute_predictions(model_name, model, tst_dataloader)
-    torch.save((y_hat, y, out), path)
+    if os.path.exists(path): 
+        y_hat, y, out = torch.load(path)
+    else: 
+        y_hat, y, out = compute_predictions(model_name, model, tst_dataloader)
+        torch.save((y_hat, y, out), path)
     return y_hat, y, out
 
-def compute_metrics(y_hat, y, out, num_classes):
+def compute_metrics(y_hat, y, out, num_classes, model_name):
 
+    if model_name in  ['blstm']: MER = mean_error_packed_seq(out)
+    else: MER = mean_error(out)
     accuracy = (F.softmax(y_hat, dim=-1).argmax(dim=-1) == y).sum().float() / float(y.size(0))
     cm = np.array(FM.confusion_matrix(y_hat.argmax(dim=-1), y, num_classes=num_classes))
 
-    return 1-accuracy, cm
+    return 1-accuracy, MER, cm
+
+def mean_error_packed_seq(out):
+    MER = 0
+    n_uterrences = 0
+    for x in out:
+        y_hat = x['y_hat']
+        y = x['y']
+        lengths = x['lengths']
+
+        l_prev = 0
+        for i, l in enumerate(lengths):
+
+            l = int(l)
+            pred = y_hat[l_prev:l_prev+l]
+            y_s = y[l_prev:l_prev+l]
+            l_prev += l
+
+            accuracy = (F.softmax(pred, dim=-1).argmax(dim=-1) == y_s).sum().float() / float(y_s.size(0))
+            MER += 1-accuracy
+            n_uterrences+=1
+
+    return MER/n_uterrences
+
+def mean_error(out):
+
+    MER = 0
+    n_uterrences = 0
+    for x in out:
+        y_hat = x['y_hat']
+        y = x['y']
+        lengths = x['lengths']
+        for i, pred in enumerate(y_hat):
+            pred = pred[:int(lengths[i])]
+            y_s = y[i][:int(lengths[i])]
+            accuracy = (F.softmax(pred, dim=-1).argmax(dim=-1) == y_s).sum().float() / float(y_s.size(0))
+            MER += 1-accuracy
+            n_uterrences+=1
+
+    return MER/n_uterrences
 
 def plot_cm(cm, model_name, diarization_config, norm=True, save=False):
 
+    plt.rcParams.update({'font.size': 20})
+
     if diarization_config == 2: target_names = ["English", "Zulu", "Xhosa", "Sesotho", "Setswana"]
-    if diarization_config == 1: target_names = ["English", "Nguni", "Sotho–Tswana"]
+    if diarization_config == 1: target_names = ["English", "    Nguni", "Sotho–\nTswana"]
     if diarization_config == 0:target_names = ["English", "Banu"]
 
     if norm: cm = np.round(cm / np.sum(cm, axis=1)[:, np.newaxis], 4)
@@ -108,7 +152,7 @@ def plot_cm(cm, model_name, diarization_config, norm=True, save=False):
 
     thresh = cm.max() / 2
     for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, "{:,}".format(cm[i, j]),
+        plt.text(j, i, "{:.4f}".format(cm[i, j]),
                     horizontalalignment="center",
                     color="white" if cm[i, j] > thresh else "black")
 
@@ -117,7 +161,7 @@ def plot_cm(cm, model_name, diarization_config, norm=True, save=False):
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
 
-    if save: plt.savefig(f"figs/cm_{model_name}_dc_{diarization_config}.svg", bbox_inches='tight', dpi=500)
+    if save: plt.savefig(f"figs/cm_{model_name}_dc_{diarization_config}.pdf", bbox_inches='tight', dpi=500)
 
 if __name__ == "__main__":
 
@@ -140,7 +184,8 @@ if __name__ == "__main__":
     if diarization_config == 1: num_classes = 3
     if diarization_config == 2: num_classes = 5
 
-    ER, cm = compute_metrics(y_hat, y, out, num_classes)
+    GER, MER, cm = compute_metrics(y_hat, y, out, num_classes, model_name)
     plot_cm(cm, model_name, diarization_config, save=args.save_cm)
 
-    print(f'Error Rate: {ER:.4f}')
+    print(f'Global Error Rate: {GER:.4f}')
+    print(f'Mean Error Rate: {MER:.4f}')

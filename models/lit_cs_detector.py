@@ -16,6 +16,8 @@ from dataclasses import dataclass
 
 @dataclass
 class ModelConfig():
+    lr_warmup_steps:int=1000
+    no_ssl_pretrain:bool=False
     backbone:str='base'
     freeze_feature_extractor:bool=True
     label_smoothing:float=0.1
@@ -116,7 +118,9 @@ class LitCSDetector(pl.LightningModule):
             checkpoint = torch.load('/home/gfrost/projects/penguin/models/WavLM-Large.pt')
             cfg = WavLMConfig(checkpoint['cfg'])
             self.backbone = WavLM(cfg)
-            self.backbone.load_state_dict(checkpoint['model'])
+            if not self.model_config.no_ssl_pretrain:
+                self.backbone.load_state_dict(checkpoint['model'])
+
             embed_dim = 1024
 
         if model_config.backbone == "wavlm-base":
@@ -262,22 +266,14 @@ class LitCSDetector(pl.LightningModule):
         return {'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':lengths.detach()}
 
     def configure_optimizers(self):
-        # if self.model_config.backbone in ["wavlm-large"]:
-        #     optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.parameters()), 
-        #                                 lr=1,
-        #                                 momentum=0.9,
-        #                                 weight_decay=self.weight_decay)
-        # else:
-        #optimizer = FusedAdam(filter(lambda p: p.requires_grad, self.parameters()), lr=1, weight_decay=self.weight_decay)
+
         optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, self.parameters()), 
                                     lr=1, 
                                     weight_decay=self.weight_decay)
 
-        # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
-
         # linear warmup + exponential decay
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer=optimizer, lr_lambda=lambda step: rate(step, self.hparams.learning_rate, 1, 1000)
+            optimizer=optimizer, lr_lambda=lambda step: rate(step, self.hparams.learning_rate, 1, self.model_config.lr_warmup_steps)
         )
 
         return {'optimizer':optimizer, 'lr_scheduler':{'scheduler':lr_scheduler, 'interval':'step'}}
@@ -390,10 +386,11 @@ def rate(step, max_lr, factor, warmup):
         step = 1
 
     lr = factor * (model_size ** (-0.5) * min(step ** (-0.5), step * warmup ** (-1.5)))
-    if step <= 6600:
-        return lr
-    if step > 6600:
-        return lr / 10
+    return lr
+    # if step <= 6600:
+    #     return lr
+    # if step > 6600:
+    #     return lr / 10
 
 def replace_label_pad_token(y):
     y[y == 255] = 0
