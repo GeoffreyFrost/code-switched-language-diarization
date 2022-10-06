@@ -3,7 +3,7 @@ import os
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cmds-path', default='runs.txt', type=str)
+    parser.add_argument('--cmds-path', default='final_runs.txt', type=str)
     args = parser.parse_args()
 
     f = open(args.cmds_path, 'r')

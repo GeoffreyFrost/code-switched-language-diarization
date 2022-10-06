@@ -145,8 +145,8 @@ class Trainer():
         return log_path
 
     def get_log_model_name(self):
-        if self.experimental_config.final and not self.model_config.mixup:
-            log_model_name = self.model_config.backbone + '-no-mixup'
+        if self.experimental_config.final:
+            log_model_name = self.model_config.backbone
         else: log_model_name = self.model_config.backbone
         return log_model_name
 

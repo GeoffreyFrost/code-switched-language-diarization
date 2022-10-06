@@ -1,9 +1,9 @@
 
 import argparse
-from pyexpat import model
 from trainer import Trainer, ExperimentConfig, TrainerConfig
 from models.lit_cs_detector import ModelConfig
-from setup import create_dfs
+from setup import create_dfs, check_wavlm_checkpoints
+
 
 def set_config(config, args):
     arg_fields = list(vars(args).keys())
@@ -39,12 +39,9 @@ def arg_paser():
     parser.add_argument('--freeze-feature-extractor', action='store_true')
     parser.add_argument('--soft-units', action='store_true')
     parser.add_argument('--fuzzy-cs-labels', action='store_true')
-    parser.add_argument('--custom-cross-entropy', action='store_true')
     parser.add_argument('--mixup', action='store_true')
     parser.add_argument('--audio-transforms', action='store_true')
-    parser.add_argument('--class-weights', default=False, action='store_true')
     parser.add_argument('--weight-decay', default=None, type=float)
-    parser.add_argument('--dc', default=False, action='store_true')
     parser.add_argument('--flatten-melspecs', default=False, action='store_true')
 
     parser.set_defaults(specaugment=False)
@@ -69,14 +66,16 @@ def arg_paser():
     return parser
 
 if __name__ == '__main__':
+
+    # check if wavlm weights are downloaded
+    check_wavlm_checkpoints()
+    
     parser = arg_paser()
     args = parser.parse_args()
     # Parse arguements to config objects
     model_config, trainer_config, experiment_config = set_configs(args)
     # Do setup check
     create_dfs(args.dataset_path)
-    print(args.gpus)
-    print(args.backbone)
     # Train
     trainer = Trainer(model_config, trainer_config, experiment_config)
     trainer.run_experiment()

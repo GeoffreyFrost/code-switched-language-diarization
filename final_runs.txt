@@ -1,0 +1,12 @@
+python main.py --baseline blstm --precision 16 --batch-size 64 --max-epochs 120 --grad-clip-val 1 --flatten-melspecs --eng-other --final
+python main.py --baseline blstm --precision 16 --batch-size 64 --max-epochs 120 --grad-clip-val 1 --flatten-melspecs --lang-fams --pretrained-eng-other --no-mono-eng --final
+python main.py --baseline blstm --precision 16 --batch-size 64 --max-epochs 120 --grad-clip-val 1 --flatten-melspecs --pretrained-lang-fams --no-mono-eng --final
+python main.py --baseline xsa --precision 16 --batch-size 64 --max-epochs 60 --grad-clip-val 1 --eng-other --final
+python main.py --baseline xsa --precision 16 --batch-size 64 --max-epochs 60 --grad-clip-val 1 --lang-fams --pretrained-eng-other --no-mono-eng --final
+python main.py --baseline xsa --precision 16 --batch-size 64 --max-epochs 60 --grad-clip-val 1 --pretrained-lang-fams --no-mono-eng --final
+python main.py --backbone wavlm-base --precision 16 --batch-size 4 --accumulate-grad-batches 16 --max-epochs 16 --grad-clip-val 0.5 --learning-rate 1e-4 --eng-other --final
+python main.py --backbone wavlm-base --precision 16 --batch-size 4 --accumulate-grad-batches 16 --max-epochs 16 --grad-clip-val 0.5 --learning-rate 1e-4 --lang-fams --pretrained-eng-other --no-mono-eng --final
+python main.py --backbone wavlm-base --precision 16 --batch-size 4 --accumulate-grad-batches 16 --max-epochs 16 --grad-clip-val 0.5 --learning-rate 1e-4 --pretrained-lang-fams --no-mono-eng --final
+python main.py --backbone wavlm-large --precision 16 --batch-size 4 --accumulate-grad-batches 16 --max-epochs 16 --grad-clip-val 0.5 --learning-rate 1e-4 --eng-other --final
+python main.py --backbone wavlm-large --precision 16 --batch-size 4 --accumulate-grad-batches 16 --max-epochs 16 --grad-clip-val 0.5 --learning-rate 1e-4 --lang-fams --pretrained-eng-other --no-mono-eng --final
+python main.py --backbone wavlm-large --precision 16 --batch-size 4 --accumulate-grad-batches 16 --max-epochs 16 --grad-clip-val 0.5 --learning-rate 1e-4 --pretrained-lang-fams --no-mono-eng --final

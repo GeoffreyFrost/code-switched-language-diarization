@@ -3,6 +3,7 @@ import os
 import numpy as np
 import shutil
 import numpy as np
+import gdown
 
 def config_logger(model_config, trainer_config, experiment_config, log_dir='logs/configs/'):
 
@@ -49,3 +50,19 @@ def config_csv_writer(config, log_dir, config_name):
         value = getattr(config, field)
         writer.writerow([field, value])
         
+def check_wavlm_checkpoints():
+    wavlm_large = 'models/weights/wavlm-large'
+    wavlm_base = 'models/weights/wavlm-base'
+    
+    if not os.path.isfile(wavlm_large): download_wavlm(wavlm_large)
+    if not os.path.isfile(wavlm_base): download_wavlm(wavlm_base)
+
+def download_wavlm(wavlm_path):
+
+    if wavlm_path.split('/')[-1] == 'wavlm-base': 
+        URL = 'https://drive.google.com/u/0/uc?id=1PlbT_9_B4F9BsD_ija84sUTVw7almNX8&export=download'
+
+        gdown.download(URL, 'models/weights/WavLM-Base.pt', quiet=False)
+    elif wavlm_path.split('/')[-1] == 'wavlm-large': 
+        URL = 'https://drive.google.com/u/0/uc?id=1rMu6PQ9vz3qPz4oIm72JDuIr5AHIbCOb&export=download'
+        gdown.download(URL, 'models/weights/WavLM-Large.pt', quiet=False)

@@ -3,5 +3,4 @@ figs
 *.ckpt
 *.pkl
 *.pt
-*.txt
 __pycache__/
