@@ -1,6 +1,7 @@
 import os
 from numpy import save
 from utils.datapreprocessor import SoapiePreprocessor
+import gdown
 
 def check_cs_pairs_df_exist(dataset_root_dir):
     cs_pairs = ['engzul', 'engxho', 'engsot', 'engtsn']
@@ -34,11 +35,17 @@ def download_wavlm(wavlm_path):
 
     if wavlm_path.split('/')[-1] == 'wavlm-base': 
         URL = 'https://drive.google.com/u/0/uc?id=1PlbT_9_B4F9BsD_ija84sUTVw7almNX8&export=download'
-
         gdown.download(URL, 'models/weights/WavLM-Base.pt', quiet=False)
     elif wavlm_path.split('/')[-1] == 'wavlm-large': 
+
         URL = 'https://drive.google.com/u/0/uc?id=1rMu6PQ9vz3qPz4oIm72JDuIr5AHIbCOb&export=download'
         gdown.download(URL, 'models/weights/WavLM-Large.pt', quiet=False)
+
+def create_directories():
+    if not os.path.exists(os.path.join(os.getcwd(), 'logs')):
+        os.makedirs(os.path.join(os.getcwd(), 'logs/results'))
+        os.makedirs(os.path.join(os.getcwd(), 'logs/final'))
+        os.makedirs(os.path.join(os.getcwd(), 'logs/configs'))
 
 if __name__ == '__main__':
     create_dfs('/home/gfrost/datasets', override=True)

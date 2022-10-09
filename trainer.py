@@ -39,6 +39,7 @@ class ExperimentConfig():
     lang_fams:bool=False
     pretrained_lang_fams:bool=False
     pretrained_eng_other:bool=True
+    pretrained_weights_path:str=''
     baseline:str=None
     cs_pair:str='all'
     data_dir:str="/home/gfrost/datasets"
@@ -135,12 +136,15 @@ class Trainer():
             self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
 
     def get_pt_log_path(self):
+        if not self.experimental_config.final: log_path = self.experimental_config.pretrained_weights_path
 
-        if self.experimental_config.pretrained_eng_other:
+        elif self.experimental_config.pretrained_eng_other:
             log_path  = f'logs/final/{self.get_log_model_name()}/lightning_logs/version_0/'
 
-        if self.experimental_config.pretrained_lang_fams:
+        elif self.experimental_config.pretrained_lang_fams:
             log_path  = f'logs/final/{self.get_log_model_name()}/lightning_logs/version_1/'
+
+        else: raise Exception("Path error")
 
         return log_path
 

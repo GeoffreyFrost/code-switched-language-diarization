@@ -161,7 +161,10 @@ def plot_cm(cm, model_name, diarization_config, norm=True, save=False):
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
 
-    if save: plt.savefig(f"figs/cm_{model_name}_dc_{diarization_config}.pdf", bbox_inches='tight', dpi=500)
+    if save: 
+        if not os.path.exists(os.path.join(os.getcwd(), 'figs')):
+            os.makedirs(os.path.join(os.getcwd(), 'figs'))
+        plt.savefig(f"figs/cm_{model_name}_dc_{diarization_config}.pdf", bbox_inches='tight', dpi=500)
 
 if __name__ == "__main__":
 

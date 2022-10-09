@@ -2,7 +2,7 @@
 import argparse
 from trainer import Trainer, ExperimentConfig, TrainerConfig
 from models.lit_cs_detector import ModelConfig
-from setup import create_dfs, check_wavlm_checkpoints
+from setup import create_dfs, check_wavlm_checkpoints, create_directories
 
 
 def set_config(config, args):
@@ -58,10 +58,12 @@ def arg_paser():
     parser.add_argument('--lang-fams', default=False, action='store_true')
     parser.add_argument('--pretrained-eng-other', default=False, action='store_true')
     parser.add_argument('--pretrained-lang-fams', default=False, action='store_true')
+    parser.add_argument('--pretrained-weights-path', type=str)
+    
     parser.add_argument('--filter-cs', default=False, action='store_true')
     parser.add_argument('--baseline', default=None)
     parser.add_argument('--cs-pair', default='all')
-    parser.add_argument('--dataset_path', default='/home/gfrost/datasets')
+    parser.add_argument('--dataset-path', default='/home/gfrost/datasets')
 
     return parser
 
@@ -69,7 +71,7 @@ if __name__ == '__main__':
 
     # check if wavlm weights are downloaded
     check_wavlm_checkpoints()
-    
+    create_directories()
     parser = arg_paser()
     args = parser.parse_args()
     # Parse arguements to config objects
