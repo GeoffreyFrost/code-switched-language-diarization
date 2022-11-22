@@ -25,8 +25,8 @@ def create_dfs(dataset_root_dir, override=False):
                 _, _, _ = soapie_processor.generate_split_dataframes(save_pkl=True)
 
 def check_wavlm_checkpoints():
-    wavlm_large = 'models/weights/wavlm-large'
-    wavlm_base = 'models/weights/wavlm-base'
+    wavlm_large = 'models/weights/WavLM-Large.pt'
+    wavlm_base = 'models/weights/WavLM-Base.pt'
     
     if not os.path.isfile(wavlm_large): download_wavlm(wavlm_large)
     if not os.path.isfile(wavlm_base): download_wavlm(wavlm_base)

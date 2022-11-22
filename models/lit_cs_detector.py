@@ -5,11 +5,9 @@ import torch.nn as nn
 import torchaudio
 import torch.nn.functional as F
 import pytorch_lightning as pl
-import numpy as np
 from utils.transforms import interp_targets, powspace, SpecAugment, MixUp, AudioTransforms
 from models.WavLM import WavLM, WavLMConfig
 from dataclasses import dataclass
-import matplotlib.pyplot as plt
 import itertools
 # from deepspeed.ops.adam import FusedAdam 
 
@@ -50,7 +48,8 @@ class LitCSDetector(pl.LightningModule):
         self.save_hyperparameters()
 
         if model_config==None: self.model_config = ModelConfig()
-        else: self.model_config = model_config
+        else: 
+            self.model_config = model_config
 
         self.label_smoothing = model_config.label_smoothing
         self.specaugment = model_config.specaugment
@@ -82,8 +81,8 @@ class LitCSDetector(pl.LightningModule):
         assert model_config.backbone in ["base","large", "xlsr", "wavlm-large",  "wavlm-base"], f'model: {model_config.backbone} not supported.'
 
         # Diffrent weight decays for wav2vec2 and wavlm
-        if model_config.weight_decay != None: self.weight_decay = model_config.weight_decay
-        elif self.model_config.backbone in ["base","large", "xlsr"]: self.weight_decay = model_config.wav2vec2_weight_decay
+        # if model_config.weight_decay != None: self.weight_decay = model_config.weight_decay
+        if self.model_config.backbone in ["base","large", "xlsr"]: self.weight_decay = model_config.wav2vec2_weight_decay
         elif self.model_config.backbone in ["wavlm-large", "wavlm-base"]: self.weight_decay = model_config.wavlm_weight_decay
 
         if model_config.backbone == "base":
@@ -186,7 +185,7 @@ class LitCSDetector(pl.LightningModule):
         x, x_l, y, y_l = batch
         y = replace_label_pad_token(y)
         y_hat, lengths, y_interp = self.forward(x, x_l, y, transforms=True)
-        loss, y = aggregate_bce_loss(y_hat, y, y_interp, lengths, self.model_config, self.custom_cross_entropy)
+        loss, y = aggregate_bce_loss(y_hat, y, y_interp, lengths, self.model_config)
         self.log('train/loss', loss, sync_dist=True)
         return {'loss':loss, 'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':lengths.detach()}
     
@@ -201,7 +200,7 @@ class LitCSDetector(pl.LightningModule):
         x, x_l, y, y_l = batch
         y = replace_label_pad_token(y)
         y_hat, lengths, _ = self.forward(x, x_l, transforms=False)
-        loss, y = aggregate_bce_loss(y_hat, y, None, lengths, self.model_config, self.custom_cross_entropy)
+        loss, y = aggregate_bce_loss(y_hat, y, None, lengths, self.model_config)
         self.log('val/loss', loss.detach().item(), sync_dist=True)
         return {'y_hat':y_hat.detach(), 'y':y.detach(), 'lengths':lengths.detach()}
 
@@ -257,8 +256,8 @@ def get_unpadded_idxs(lengths):
     return torch.cat([torch.arange(max_len*i, max_len*i+l) for i, l in enumerate(lengths)]).to(torch.long)
 
 # Next time just use normal torch bce, with padding labels c:
-def aggregate_bce_loss(y_hat, y, y_interp, lengths, cfg, custom_cross_entropy=None):
-    
+def aggregate_bce_loss(y_hat, y, y_interp, lengths, cfg):
+
     # In case we apply mixup
     if y_interp == None:
         y = interp_targets(y, torch.max(lengths))

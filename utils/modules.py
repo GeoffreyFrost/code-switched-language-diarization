@@ -15,7 +15,8 @@ def config_logger(model_config, trainer_config, experiment_config, log_dir='logs
     
 def check_config_overlap(path1='logs/lightning_logs/', path2='logs/configs/'):
 
-    exp_dirs = os.listdir(path1)
+    try: exp_dirs = os.listdir(path1)
+    except: return
     config_dirs = os.listdir(path2)
     exp_vers = strip_version_number(exp_dirs)
     config_vers = strip_version_number(config_dirs)
@@ -32,14 +33,24 @@ def strip_version_number(versions):
     return [eval(version.split('_')[-1]) for version in versions]
 
 def setup_config_dir(log_dir, path='logs/lightning_logs/'):
+
+    if not os.path.exists(path):  
+        log_dir = os.path.join(log_dir, f'configs_version_{0}')
+        if os.path.exists(log_dir): return log_dir, 0
+        os.makedirs(log_dir)
+        return log_dir, 0
+
     exp_dirs = os.listdir(path)
     latest_exp = 0
+
     for exp_dir in exp_dirs: 
-        if eval(exp_dir.split('_')[-1]) > latest_exp:  latest_exp = eval(exp_dir.split('_')[-1])
+        if eval(exp_dir.split('_')[-1]) > latest_exp: latest_exp = eval(exp_dir.split('_')[-1])
+
     latest_exp+=1
     log_dir = os.path.join(log_dir, f'configs_version_{latest_exp}')
     if os.path.exists(log_dir): return log_dir, latest_exp
     os.makedirs(log_dir)
+
     return log_dir, latest_exp
 
 def config_csv_writer(config, log_dir, config_name):

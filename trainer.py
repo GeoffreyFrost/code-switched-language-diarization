@@ -15,6 +15,7 @@ import torch.nn as nn
 import math
 import os
 import dataclasses
+from copy import deepcopy
 
 @dataclass
 class TrainerConfig():
@@ -74,8 +75,12 @@ class Trainer():
             df_trn = pd.concat(dfs_trn)
             df_dev = pd.concat(dfs_dev)
             
-            # if self.experimental_config.lang_fams: self.model_config.n_classes = 3
-            self.model_config.n_classes = len(self.supported_cs_pairs) + 1
+            print(self.experimental_config.lang_fams)
+            print(self.experimental_config.eng_other)
+
+            if self.experimental_config.eng_other: self.model_config.n_classes = 2
+            elif self.experimental_config.lang_fams: self.model_config.n_classes = 3
+            else: self.model_config.n_classes = len(self.supported_cs_pairs) + 1
 
         d = pd.Series(df_dev.audio_fpath)
         t = pd.Series(df_trn.audio_fpath)
@@ -120,33 +125,54 @@ class Trainer():
                 self.model = LitBLSTME2E(self.model_config, self.experimental_config)
             if self.experimental_config.baseline == 'xsa':
                 self.model = LitXSAE2E(self.model_config)
-
         else: 
             self.model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
                 model_config=self.model_config)
 
             pretrained = self.experimental_config.pretrained_eng_other or self.experimental_config.pretrained_lang_fams
             self.load_pt(pretrained)
-
+            self.model.model_config = self.model_config # Hack to get around the fact that the model config is not saved in the checkpoint
 
     def load_pt(self, pretrained):
         if pretrained:
-            log_path = self.get_pt_log_path()
+            log_path, n_classes = self.get_pt_log_path()
             ckpt = torch.load(get_checkpoint_path(log_path))
-            self.model = load_pretrained_weights(self.model, ckpt, self.model_config)
+
+            model_config_cpy = deepcopy(self.model_config)
+            model_config_cpy.n_classes = n_classes
+
+
+            if self.experimental_config.baseline != None:
+                self.model_config.backbone = self.experimental_config.baseline
+                assert self.experimental_config.baseline in ['blstm', 'xsa']
+
+                if self.experimental_config.baseline == 'blstm':
+                    pt_model = LitBLSTME2E(model_config_cpy, self.experimental_config)
+                    pt_model.load_state_dict(ckpt['state_dict'])
+
+                if self.experimental_config.baseline == 'xsa':
+                    pt_model = LitXSAE2E(model_config_cpy)
+                    pt_model.load_state_dict(ckpt['state_dict'])
+            else: 
+                pt_model = LitCSDetector(learning_rate=self.trainer_config.learning_rate, 
+                    model_config=model_config_cpy)
+                pt_model.load_state_dict(ckpt['state_dict'])
+
+            self.model = load_pretrained_weights(pt_model, self.model_config)
 
     def get_pt_log_path(self):
         if not self.experimental_config.final: log_path = self.experimental_config.pretrained_weights_path
 
         elif self.experimental_config.pretrained_eng_other:
             log_path  = f'logs/final/{self.get_log_model_name()}/lightning_logs/version_0/'
+            n_classes = 2
 
         elif self.experimental_config.pretrained_lang_fams:
             log_path  = f'logs/final/{self.get_log_model_name()}/lightning_logs/version_1/'
-
+            n_classes = 3
         else: raise Exception("Path error")
 
-        return log_path
+        return log_path, n_classes
 
     def get_log_model_name(self):
         if self.experimental_config.final:
@@ -170,7 +196,7 @@ class Trainer():
                         precision=self.trainer_config.precision,
                         accelerator='gpu',
                         devices=self.trainer_config.gpus,
-                        strategy="ddp" if len(self.trainer_config.gpus) > 1 else None
+                        strategy="ddp" if len(self.trainer_config.gpus) > 1 else None,
                     )
 
         trainer.fit(self.model, train_dataloader, dev_dataloader)
@@ -200,8 +226,7 @@ def get_checkpoint_path(root):
             if file.split('.')[-1] == 'ckpt' and file.split('.')[0] != 'last' and file.split('.')[0] != 'kek':
                 return os.path.join(root, file)
 
-def load_pretrained_weights(model, ckpt, model_config):
-    model.load_state_dict(ckpt['state_dict'])
+def load_pretrained_weights(model, model_config):
 
     if model_config.backbone == 'blstm': 
         model.encoder.head = nn.Linear(512, model_config.n_classes) # re-initialize head
