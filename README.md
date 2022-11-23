@@ -20,7 +20,7 @@ repo = 'GeoffreyFrost/code-switched-language-diarization'
 # There are three diarization options: 0 (eng/other), 1 (eng/nguni/sesotho-tswana), 2 (eng/zulu/xhosa/sesotho/setswana)
 diarization_config = 0
 
-model = torch.hub.load(repo, wavlm_for_ld, diarization_config=diarization_config, device=device)
+model = torch.hub.load(repo, 'wavlm_for_ld', diarization_config=diarization_config, device=device)
 
 # NB: Only supports 16kHz audio
 device = torch.device(device)
