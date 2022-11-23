@@ -6,29 +6,30 @@ import torch.nn.functional as F
 import torch
 import math
 
-from models.lit_cs_detector import get_padding_masks_from_length
 from models.WavLM import WavLM, WavLMConfig
 
 # helpers
+def get_padding_masks_from_length(source, lengths):
+    indexs = torch.arange(source.size(-1)).unsqueeze(dim=0).repeat(lengths.size(0), 1).type_as(lengths)
+    lengths = lengths.unsqueeze(dim=-1).repeat(1, indexs.size(-1))
+    padding_mask = indexs > lengths
+    return padding_mask
+
 class Model(nn.Module):
-    def __init__(self, diarzation_config, backbone):
+    def __init__(self, diarization_config, backbone):
         super().__init__()
 
-        if diarzation_config == 0: n_classes = 2
-        if diarzation_config == 1: n_classes = 3
-        if diarzation_config == 2: n_classes = 5
+        if diarization_config == 0: n_classes = 2
+        if diarization_config == 1: n_classes = 3
+        if diarization_config == 2: n_classes = 5
 
         if backbone == "wavlm-large":
-            checkpoint = torch.load('/home/gfrost/projects/penguin/models/weights/WavLM-Large-cfg.pt')
+            checkpoint = torch.hub.load_state_dict_from_url("https://github.com/GeoffreyFrost/code-switched-language-diarization/releases/download/v1.0.0/WavLM-Large-cfg.pt")
             cfg = WavLMConfig(checkpoint['cfg'])
             self.backbone = WavLM(cfg)
             embed_dim = 1024
 
-        if backbone == "wavlm-base":
-            checkpoint = torch.load('/home/gfrost/projects/penguin/models/weights/WavLM-Base-cfg.pt')
-            cfg = WavLMConfig(checkpoint['cfg'])
-            self.backbone = WavLM(cfg)
-            embed_dim = 768
+        else: raise NotImplementedError
 
         self.head = nn.Linear(embed_dim, n_classes)
         nn.init.xavier_uniform_(self.head.weight, gain=1 / math.sqrt(2))
@@ -42,16 +43,23 @@ class Model(nn.Module):
 
         return x, lengths
 
-def load_wavlm(diarzation_config, device='cuda') -> Model:
-    """Load fine-tuned wavlm for LD for diarzation config"""
+def wavlm_for_ld(diarization_config=0, backbone='wavlm-large', pretrained=True, progress=True, device='cuda'):
+    """Load a fine-tuned wavlm model for LD for a diarzation config
+        0 - eng/other
+        1 - eng/nguni/sesotho-tswana
+        2 - eng/zulu/xhosa/sesotho/setswana
+    """
 
-    if diarzation_config == 0: ckpt_file_path = ''
-    if diarzation_config == 1: ckpt_file_path = ''
-    if diarzation_config == 2: ckpt_file_path = ''
+    if diarization_config == 0: ckpt_url = 'https://github.com/GeoffreyFrost/code-switched-language-diarization/releases/download/v1.0.0/WavLM-Large-ld-0.pt'
+    if diarization_config == 1: ckpt_url = 'https://github.com/GeoffreyFrost/code-switched-language-diarization/releases/download/v1.0.0/WavLM-Large-ld-1.pt'
+    if diarization_config == 2: ckpt_url = 'https://github.com/GeoffreyFrost/code-switched-language-diarization/releases/download/v1.0.0/WavLM-Large-ld-2.pt'
 
-    model = model(diarzation_config)
+    model = Model(diarization_config, backbone)
 
-    model = model.load_from_checkpoint(ckpt_file_path).eval()
+    if pretrained:
+        state_dict = torch.hub.load_state_dict_from_url(ckpt_url, progress=progress)
+        model.load_state_dict(state_dict)
+    
     device = torch.device(device)
 
     return model.to(device)
