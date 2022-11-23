@@ -24,9 +24,10 @@ model = torch.hub.load(repo, 'wavlm_for_ld', diarization_config=diarization_conf
 
 # NB: Only supports 16kHz audio
 device = torch.device(device)
-audio, sr = torchaudio.load('path/to/your/16kHz/utterence').to(device)
+audio, sr = torchaudio.load('path/to/your/16kHz/utterence')
+audio = audio.to(device)
 l = torch.tensor([audio.size(-1)]).to(device)
-logits = model.forward(x, l)
+logits = model.forward(audio, l)
 y_hat = F.softmax(logits, dim=-1)
 ```
 
