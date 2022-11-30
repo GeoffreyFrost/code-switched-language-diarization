@@ -123,4 +123,4 @@ Parts of code for this project are adapted from the following repositories:
 - [https://github.com/Lhx94As/E2E-language-diarization](https://github.com/Lhx94As/E2E-language-diarization)
 
 ## Citation
-To be added after publication of SACAIR2022 proceedings
+> Frost, G., Morris, E., Jansen van Vüren, J., Niesler, T. (2022). Fine-Tuned Self-supervised Speech Representations for Language Diarization in Multilingual Code-Switched Speech. In: Pillay, A., Jembere, E., Gerber, A. (eds) Artificial Intelligence Research. SACAIR 2022. Communications in Computer and Information Science, vol 1734. Springer, Cham. https://doi.org/10.1007/978-3-031-22321-1_17
